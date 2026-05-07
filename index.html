@@ -1,0 +1,202 @@
+<!-- ButterflyDreaming Media Module — index.html — BD Protocol v0.1 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BUTTERFLY DREAMING — L-SYSTEM MUSIC MODULE</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      background: #0a0a0f;
+      color: #e8e8e0;
+      font-family: Georgia, system-ui, serif;
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .header {
+      opacity: 0.6;
+      font-size: 0.78em;
+      max-width: 900px;
+      margin-bottom: 12px;
+      line-height: 1.6;
+    }
+    .header h2 {
+      font-size: 0.95em;
+      letter-spacing: 0.08em;
+      margin: 0 0 8px 0;
+      font-weight: normal;
+    }
+    .header p { margin: 0 0 6px 0; }
+    hr {
+      border: none;
+      border-top: 1px solid #4a9b8e44;
+      margin: 14px 0 18px 0;
+      max-width: 900px;
+    }
+    .columns {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+      max-width: 1060px;
+    }
+    .left {
+      flex: 0 0 340px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .right { flex: 1; }
+    label.field-label {
+      font-size: 0.72em;
+      letter-spacing: 0.1em;
+      color: #4a9b8e;
+      display: block;
+      margin-bottom: 4px;
+    }
+    textarea {
+      width: 100%;
+      background: #0e0e16;
+      color: #e8e8e0;
+      border: 1px solid #4a9b8e55;
+      font-family: 'Courier New', monospace;
+      font-size: 0.78em;
+      padding: 8px;
+      resize: vertical;
+      outline: none;
+      line-height: 1.5;
+      height: 390px;
+    }
+    textarea:focus { border-color: #4a9b8e; }
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button {
+      background: #0e0e16;
+      color: #4a9b8e;
+      border: 1px solid #4a9b8e;
+      padding: 6px 14px;
+      font-family: Georgia, system-ui, serif;
+      font-size: 0.82em;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+    }
+    button:hover { background: #4a9b8e22; }
+    #status {
+      font-size: 0.78em;
+      color: #e8e8e0;
+      opacity: 0.7;
+      min-height: 1.4em;
+      padding: 4px 0;
+      border-top: 1px solid #4a9b8e22;
+    }
+    iframe {
+      border: 1px solid #4a9b8e55;
+      display: block;
+      background: #0a0a0f;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h2>SIMPLE EXAMPLE OF TEXT TO MEDIA — ButterflyDreaming Platform</h2>
+  <p>This page demonstrates how a text node from the ButterflyDreaming graph can drive a media module.
+  In the live platform the L-system notation and %%bd_ directives shown below would be found in a
+  graph node, discovered and edited collaboratively by two anonymous users during a dyadic encounter.</p>
+  <p>The %%bd_ directives are a shared platform language — each directive is available to all media
+  modules, which are free to interpret them in their own way or ignore them silently. A directive that
+  controls reverb in a music module might influence colour or motion in a visual module.</p>
+  <p>In ButterflyDreaming the creative process is always collaborative. New nodes are produced by
+  merge-editing of ancestor nodes, so the set of directives a user encounters grows gradually through
+  inheritance rather than being invented from scratch.</p>
+</div>
+
+<hr>
+
+<div class="columns">
+  <div class="left">
+    <label class="field-label">EXTENDED L-SYSTEM NOTATION</label>
+    <textarea id="ls-input" spellcheck="false">%%bd_module lsmusic_module.html
+%%bd_axiom X
+%%bd_rules [
+X=-YF+XFX+FY-
+Y=+XF-YFY-FX+
+%%bd_]
+%%bd_depth 4
+%%bd_angle 90
+%%bd_scale pentatonic
+%%bd_tempo 80
+%%bd_octave_centre 4
+%%bd_loop true
+%%bd_loop_gap 4
+%%bd_reverb_wet 0.35
+%%bd_reverb_decay 2.5
+%%bd_vibrato_frequency 5.0
+%%bd_vibrato_depth 0.2
+%%bd_chorus_wet 0.3
+%%bd_chorus_depth 0.4</textarea>
+
+    <div class="btn-row">
+      <button id="send-btn">Send to Player</button>
+      <button id="request-btn">Request Update</button>
+    </div>
+    <div id="status">—</div>
+  </div>
+
+  <div class="right">
+    <iframe id="lsmusic-module" src="lsmusic_module.html" width="600" height="500"></iframe>
+  </div>
+</div>
+
+<script>
+  // ButterflyDreaming harness — postMessage protocol v0.1
+  // Production: tighten origin to "https://butterflydreaming.info"
+
+  const iframe = document.getElementById('lsmusic-module')
+  const textarea = document.getElementById('ls-input')
+  const statusEl = document.getElementById('status')
+
+  function setStatus(msg) {
+    statusEl.textContent = msg
+  }
+
+  function sendInit() {
+    const text = textarea.value
+    iframe.contentWindow.postMessage({ type: 'BD_INIT', payload: { text } }, '*')
+    setStatus('Sent BD_INIT to player')
+  }
+
+  document.getElementById('send-btn').addEventListener('click', sendInit)
+
+  document.getElementById('request-btn').addEventListener('click', () => {
+    iframe.contentWindow.postMessage({ type: 'BD_REQUEST_UPDATE' }, '*')
+    setStatus('Requested update from player…')
+  })
+
+  window.addEventListener('message', (event) => {
+    try {
+      const msg = event.data
+      if (!msg || !msg.type) return
+      switch (msg.type) {
+        case 'BD_READY':
+          setStatus('Module ready')
+          break
+        case 'BD_UPDATE':
+          textarea.value = msg.payload.text
+          setStatus('Received update from module')
+          break
+        case 'BD_ERROR':
+          setStatus('Error: ' + (msg.payload?.message || 'unknown'))
+          break
+      }
+    } catch (e) {
+      setStatus('Error handling message: ' + e.message)
+    }
+  })
+</script>
+</body>
+</html>

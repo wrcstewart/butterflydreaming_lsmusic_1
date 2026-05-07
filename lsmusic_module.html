@@ -1,0 +1,846 @@
+<!-- ButterflyDreaming Media Module — lsmusic_module.html — BD Protocol v0.1 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>L-System Music Module</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/abcjs/6.2.2/abcjs-basic-min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lindenmayer/dist/lindenmayer.browser.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      background: #0a0a0f;
+      color: #e8e8e0;
+      font-family: Georgia, system-ui, serif;
+      margin: 0;
+      padding: 14px 16px;
+      font-size: 13px;
+    }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #4a9b8e33;
+      padding-bottom: 6px;
+    }
+    #status {
+      font-size: 0.88em;
+      opacity: 0.85;
+    }
+    #module-label {
+      font-size: 0.72em;
+      opacity: 0.45;
+      letter-spacing: 0.05em;
+    }
+    .controls-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    button {
+      background: #0e0e16;
+      color: #4a9b8e;
+      border: 1px solid #4a9b8e;
+      padding: 5px 12px;
+      font-family: Georgia, system-ui, serif;
+      font-size: 0.82em;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+    }
+    button:hover:not(:disabled) { background: #4a9b8e22; }
+    button:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    .section {
+      border: 1px solid #4a9b8e22;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+    .section-title {
+      font-size: 0.68em;
+      letter-spacing: 0.12em;
+      color: #4a9b8e;
+      margin-bottom: 8px;
+    }
+    .row {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .field label {
+      font-size: 0.68em;
+      letter-spacing: 0.1em;
+      color: #4a9b8e;
+      opacity: 0.8;
+    }
+    select {
+      background: #0e0e16;
+      color: #e8e8e0;
+      border: 1px solid #4a9b8e55;
+      padding: 3px 6px;
+      font-family: Georgia, system-ui, serif;
+      font-size: 0.82em;
+      outline: none;
+    }
+    select:focus { border-color: #4a9b8e; }
+    input[type="text"] {
+      background: #0e0e16;
+      color: #e8e8e0;
+      border: 1px solid #4a9b8e55;
+      padding: 3px 7px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.88em;
+      outline: none;
+      width: 120px;
+    }
+    input[type="text"]:focus { border-color: #4a9b8e; }
+    textarea.rules-area {
+      width: 100%;
+      background: #0e0e16;
+      color: #e8e8e0;
+      border: 1px solid #4a9b8e55;
+      font-family: 'Courier New', monospace;
+      font-size: 0.82em;
+      padding: 6px 8px;
+      resize: vertical;
+      outline: none;
+      height: 56px;
+      line-height: 1.5;
+    }
+    textarea.rules-area:focus { border-color: #4a9b8e; }
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+    .slider-row label {
+      font-size: 0.67em;
+      letter-spacing: 0.09em;
+      color: #4a9b8e;
+      opacity: 0.8;
+      width: 140px;
+      flex-shrink: 0;
+    }
+    input[type="range"] {
+      flex: 1;
+      accent-color: #4a9b8e;
+      height: 3px;
+      cursor: pointer;
+    }
+    .slider-val {
+      font-size: 0.75em;
+      opacity: 0.65;
+      width: 52px;
+      text-align: right;
+      font-family: 'Courier New', monospace;
+    }
+    .tempo-val {
+      font-size: 0.75em;
+      opacity: 0.65;
+      font-family: 'Courier New', monospace;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Status row -->
+<div class="status-row">
+  <span id="status">Loading samples…</span>
+  <span id="module-label">Module: lsmusic_module.html</span>
+</div>
+
+<!-- Transport controls -->
+<div class="controls-row">
+  <button id="play-btn" disabled>Play</button>
+  <button id="stop-btn">Stop</button>
+  <button id="copy-btn" disabled>Copy Music</button>
+</div>
+
+<!-- Grammar controls -->
+<div class="section">
+  <div class="section-title">PLAYBACK CONTROLS</div>
+  <div class="row">
+    <div class="field">
+      <label>DEPTH</label>
+      <select id="depth-sel">
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4" selected>4</option>
+        <option value="5">5</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>SCALE</label>
+      <select id="scale-sel">
+        <option value="major">major</option>
+        <option value="pentatonic" selected>pentatonic</option>
+        <option value="blues">blues</option>
+      </select>
+    </div>
+    <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
+      <label style="white-space:nowrap;">TEMPO</label>
+      <input type="range" id="tempo-slider" min="40" max="160" value="80" style="width:100px;">
+      <span class="tempo-val" id="tempo-val">80 BPM</span>
+    </div>
+  </div>
+</div>
+
+<!-- Grammar area -->
+<div class="section">
+  <div class="section-title">L-SYSTEM GRAMMAR</div>
+  <div class="row">
+    <div class="field">
+      <label>AXIOM</label>
+      <input type="text" id="axiom-input" value="X" placeholder="e.g. X">
+    </div>
+  </div>
+  <div class="field" style="width:100%;">
+    <label>RULES (one per line, format X=replacement)</label>
+    <textarea class="rules-area" id="rules-area" spellcheck="false">X=-YF+XFX+FY-
+Y=+XF-YFY-FX+</textarea>
+  </div>
+</div>
+
+<!-- Audio effects -->
+<div class="section">
+  <div class="section-title">AUDIO EFFECTS</div>
+
+  <div class="slider-row">
+    <label>REVERB WET</label>
+    <input type="range" id="reverb-wet" min="0" max="1" step="0.01" value="0.35">
+    <span class="slider-val" id="reverb-wet-val">0.35</span>
+  </div>
+  <div class="slider-row">
+    <label>REVERB DECAY (s)</label>
+    <input type="range" id="reverb-decay" min="0.1" max="10" step="0.1" value="2.5">
+    <span class="slider-val" id="reverb-decay-val">2.5s</span>
+  </div>
+  <div class="slider-row">
+    <label>VIBRATO FREQUENCY (Hz)</label>
+    <input type="range" id="vibrato-freq" min="1" max="10" step="0.1" value="5.0">
+    <span class="slider-val" id="vibrato-freq-val">5.0 Hz</span>
+  </div>
+  <div class="slider-row">
+    <label>VIBRATO DEPTH</label>
+    <input type="range" id="vibrato-depth" min="0" max="1" step="0.01" value="0.2">
+    <span class="slider-val" id="vibrato-depth-val">0.20</span>
+  </div>
+  <div class="slider-row">
+    <label>CHORUS WET</label>
+    <input type="range" id="chorus-wet" min="0" max="1" step="0.01" value="0.3">
+    <span class="slider-val" id="chorus-wet-val">0.30</span>
+  </div>
+  <div class="slider-row">
+    <label>CHORUS DEPTH</label>
+    <input type="range" id="chorus-depth" min="0" max="1" step="0.01" value="0.4">
+    <span class="slider-val" id="chorus-depth-val">0.40</span>
+  </div>
+</div>
+
+<script>
+// ─── BD Parser ────────────────────────────────────────────────────────────────
+// Two-state machine. Single-line: %%bd_name value. Multi-line: %%bd_name [ ... %%bd_]
+function parseBD(text) {
+  const directives = {}
+  const lines = text.split('\n')
+  let state = 'text'
+  let currentDirective = null
+  let currentLines = []
+
+  for (const line of lines) {
+    if (state === 'text') {
+      if (line.startsWith('%%bd_')) {
+        const spaceIdx = line.indexOf(' ')
+        if (spaceIdx === -1) continue
+        const name = line.slice(5, spaceIdx)
+        const value = line.slice(spaceIdx + 1).trim()
+        if (value === '[') {
+          currentDirective = name
+          currentLines = []
+          state = 'bracket'
+        } else {
+          directives[name] = value
+        }
+      }
+    } else if (state === 'bracket') {
+      if (line.trim() === '%%bd_]') {
+        directives[currentDirective] = currentLines.join('\n')
+        state = 'text'
+      } else {
+        currentLines.push(line)
+      }
+    }
+  }
+  return directives
+}
+
+// ─── Rules parser ──────────────────────────────────────────────────────────────
+// Parses multi-line rules block. Each line: symbol=replacement
+function parseRules(rulesText) {
+  const productions = {}
+  for (const line of rulesText.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eqIdx = trimmed.indexOf('=')
+    if (eqIdx < 1) continue
+    const sym = trimmed.slice(0, eqIdx).trim()
+    const rep = trimmed.slice(eqIdx + 1)
+    productions[sym] = rep
+  }
+  return productions
+}
+
+// ─── Scales ────────────────────────────────────────────────────────────────────
+const SCALES = {
+  major:      [0, 2, 4, 5, 7, 9, 11],
+  pentatonic: [0, 2, 4, 7, 9],
+  blues:      [0, 3, 5, 6, 7, 10]
+}
+
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+
+function pitchToMidi(noteName, octave) {
+  const idx = NOTE_NAMES.indexOf(noteName)
+  if (idx < 0) return 60
+  return (octave + 1) * 12 + idx
+}
+
+function midiToPitch(midi) {
+  const octave = Math.floor(midi / 12) - 1
+  const idx = midi % 12
+  return { note: NOTE_NAMES[idx], octave }
+}
+
+// F#2 = midi 42, E4 = midi 64 (bass recorder range)
+const MIDI_MIN = pitchToMidi('F#', 2)  // 42
+const MIDI_MAX = pitchToMidi('E', 4)   // 64
+
+function mapYToPitch(y, yMin, yMax, scaleName, octaveCentre) {
+  if (yMax === yMin) {
+    return `C${octaveCentre}`
+  }
+  const yNorm = (y - yMin) / (yMax - yMin)  // [0, 1]
+  // Map across 4-octave span centred on octaveCentre
+  // yMin → octaveCentre-2, yMax → octaveCentre+2
+  const spanSemitones = 48
+  const semitonePos = yNorm * spanSemitones  // [0, 48)
+
+  const octaveOffset = Math.floor(semitonePos / 12)
+  const semitoneInOctave = semitonePos % 12
+
+  const degrees = SCALES[scaleName] || SCALES.pentatonic
+  let nearest = degrees[0]
+  let minDist = Infinity
+  for (const d of degrees) {
+    const dist = Math.min(
+      Math.abs(semitoneInOctave - d),
+      Math.abs(semitoneInOctave - (d + 12))
+    )
+    if (dist < minDist) { minDist = dist; nearest = d }
+  }
+
+  let octave = (octaveCentre - 2) + octaveOffset
+  let noteIdx = nearest
+
+  // Clamp to F#2..E4
+  let midi = (octave + 1) * 12 + noteIdx
+  midi = Math.max(MIDI_MIN, Math.min(MIDI_MAX, midi))
+  const { note, octave: clampedOct } = midiToPitch(midi)
+  return `${note}${clampedOct}`
+}
+
+// ─── Turtle interpreter ────────────────────────────────────────────────────────
+function runTurtle(lstring, angleDeg) {
+  let x = 0, y = 0, angle = 0
+  const stack = []
+  const segments = []
+
+  for (const ch of lstring) {
+    if (ch === 'F') {
+      const rad = angle * Math.PI / 180
+      const nx = x + Math.cos(rad)
+      const ny = y + Math.sin(rad)
+      segments.push({ x1: x, y1: y, x2: nx, y2: ny })
+      x = nx
+      y = ny
+    } else if (ch === '+') {
+      angle += angleDeg
+    } else if (ch === '-') {
+      angle -= angleDeg
+    } else if (ch === '[') {
+      stack.push({ x, y, angle })
+    } else if (ch === ']') {
+      if (stack.length > 0) {
+        const s = stack.pop()
+        x = s.x; y = s.y; angle = s.angle
+      }
+    }
+  }
+  return segments
+}
+
+// ─── Segment classification ────────────────────────────────────────────────────
+// Returns array of Y values for each horizontal segment (vertical segments skipped)
+function classifyHorizontalY(segments) {
+  const TOL = 0.001
+  const yValues = []
+  for (const seg of segments) {
+    if (Math.abs(seg.y2 - seg.y1) < TOL) {
+      yValues.push((seg.y1 + seg.y2) / 2)
+    }
+  }
+  return yValues
+}
+
+// ─── Build note array ──────────────────────────────────────────────────────────
+function buildNotes(axiom, productions, depth, angleDeg, scaleName, octaveCentre) {
+  const lsystem = new LSystem({ axiom, productions })
+  lsystem.iterate(depth)
+  const lstring = lsystem.getString()
+
+  const segments = runTurtle(lstring, angleDeg)
+  const yValues = classifyHorizontalY(segments)
+
+  if (yValues.length === 0) return []
+
+  const yMin = Math.min(...yValues)
+  const yMax = Math.max(...yValues)
+
+  return yValues.map(y => mapYToPitch(y, yMin, yMax, scaleName, octaveCentre))
+}
+
+// ─── ABC generation (internal, for Copy Music) ────────────────────────────────
+function toneToABC(tonePitch) {
+  const m = tonePitch.match(/^([A-G]#?)(\d)$/)
+  if (!m) return 'z'
+  const noteName = m[1]
+  const oct = parseInt(m[2])
+  const abcMap = {
+    'C':'C','C#':'^C','D':'D','D#':'^D','E':'E','F':'F',
+    'F#':'^F','G':'G','G#':'^G','A':'A','A#':'^A','B':'B'
+  }
+  let base = abcMap[noteName] || 'C'
+  // ABC middle octave (no marker) = octave 4
+  if (oct === 5) base = base.replace(/[A-G]/, c => c.toLowerCase())
+  else if (oct === 3) base += ','
+  else if (oct === 2) base += ',,'
+  else if (oct === 6) base = base.replace(/[A-G]/, c => c.toLowerCase()) + "'"
+  return base
+}
+
+function buildABC(notes, tempo) {
+  const abcNotes = notes.map(toneToABC)
+  let abc = `X:1\nT:L-System Fragment\nM:4/4\nL:1/4\nQ:1/4=${Math.round(tempo)}\nK:C\n`
+  // Group into bars of 4 beats, bars grouped in lines of 4
+  let line = '|'
+  let beatCount = 0
+  let barCount = 0
+  for (let i = 0; i < abcNotes.length; i++) {
+    line += abcNotes[i]
+    beatCount++
+    if (beatCount === 4) {
+      line += '|'
+      beatCount = 0
+      barCount++
+      if (barCount % 4 === 0) {
+        abc += line + '\n'
+        line = '|'
+      }
+    }
+  }
+  if (beatCount > 0) {
+    while (beatCount < 4) { line += 'z'; beatCount++ }
+    line += '|'
+    abc += line + '\n'
+  } else if (line !== '|') {
+    abc += line + '\n'
+  }
+  return abc
+}
+
+// ─── Audio setup ──────────────────────────────────────────────────────────────
+// Signal chain: Sampler → Chorus → Vibrato → Reverb → Destination
+const reverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 })
+const vibrato = new Tone.Vibrato({ frequency: 5, depth: 0.2, type: 'sine' })
+const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.4, wet: 0.3 })
+chorus.start()
+
+const sampler = new Tone.Sampler({
+  urls: {
+    'F#2': 'bass_recorder_Fs2.mp3',
+    'C3':  'bass_recorder_C3.mp3',
+    'G#3': 'bass_recorder_Gs3.mp3',
+    'E4':  'bass_recorder_E4.mp3'
+  },
+  baseUrl: './bass-recorder/',
+  onload: onSamplerLoaded,
+  onerror: (err) => postError('Sample load failed: ' + err)
+})
+
+sampler.connect(chorus)
+chorus.connect(vibrato)
+vibrato.connect(reverb)
+reverb.toDestination()
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let samplerReady = false
+let grammarReady = false
+let isPlaying = false
+let restartTimeout = null
+let paramsChanged = false
+let currentNotes = []   // array of pitch strings
+let currentABC = ''
+
+let params = {
+  axiom: 'X',
+  rules: { X: '-YF+XFX+FY-', Y: '+XF-YFY-FX+' },
+  depth: 4,
+  angle: 90,
+  scale: 'pentatonic',
+  tempo: 80,
+  octaveCentre: 4,
+  loop: true,
+  loopGap: 4,
+  reverbWet: 0.35,
+  reverbDecay: 2.5,
+  vibratoFreq: 5.0,
+  vibratoDepth: 0.2,
+  chorusWet: 0.3,
+  chorusDepth: 0.4
+}
+
+// pending UI values (applied at next loop boundary)
+let pending = Object.assign({}, params)
+
+// ─── Status helpers ────────────────────────────────────────────────────────────
+function setStatus(msg) {
+  document.getElementById('status').textContent = msg
+}
+
+function postError(msg) {
+  setStatus('Error: ' + msg)
+  try { window.parent.postMessage({ type: 'BD_ERROR', payload: { message: msg } }, '*') } catch(e) {}
+}
+
+// ─── Sample load callback ─────────────────────────────────────────────────────
+async function onSamplerLoaded() {
+  try {
+    await reverb.ready
+    samplerReady = true
+    setStatus(grammarReady ? 'Ready — press Play' : 'Samples loaded — awaiting script')
+    updatePlayButton()
+  } catch (e) {
+    postError('Reverb initialisation failed: ' + e.message)
+  }
+}
+
+// ─── Compute notes from current grammar ───────────────────────────────────────
+function recompute() {
+  try {
+    currentNotes = buildNotes(
+      params.axiom, params.rules, params.depth,
+      params.angle, params.scale, params.octaveCentre
+    )
+    if (currentNotes.length === 0) {
+      postError('No horizontal segments found — no notes to play')
+      grammarReady = false
+      updatePlayButton()
+      return false
+    }
+    currentABC = buildABC(currentNotes, params.tempo)
+    grammarReady = true
+    updatePlayButton()
+    document.getElementById('copy-btn').disabled = false
+    return true
+  } catch (e) {
+    postError('L-system error: ' + e.message)
+    grammarReady = false
+    updatePlayButton()
+    return false
+  }
+}
+
+// ─── Apply pending params to live effects ────────────────────────────────────
+async function applyPending() {
+  params = Object.assign({}, pending)
+  reverb.wet.value = params.reverbWet
+  vibrato.frequency.value = params.vibratoFreq
+  vibrato.depth.value = params.vibratoDepth
+  chorus.wet.value = params.chorusWet
+  chorus.depth = params.chorusDepth
+
+  reverb.decay = params.reverbDecay
+  await reverb.ready
+}
+
+// ─── Scheduling & loop ────────────────────────────────────────────────────────
+function scheduleAndPlay() {
+  Tone.Transport.cancel()
+  Tone.Transport.stop()
+  Tone.Transport.position = 0
+
+  const noteDurSec = 60 / params.tempo
+  const totalDurSec = currentNotes.length * noteDurSec
+
+  currentNotes.forEach((pitch, i) => {
+    Tone.Transport.schedule((time) => {
+      sampler.triggerAttackRelease(pitch, noteDurSec * 0.92, time)
+    }, i * noteDurSec)
+  })
+
+  Tone.Transport.start()
+  setStatus('Playing')
+
+  if (params.loop) {
+    restartTimeout = setTimeout(async () => {
+      if (!isPlaying) return
+      if (paramsChanged) {
+        paramsChanged = false
+        await applyPending()
+        if (!recompute()) { isPlaying = false; updatePlayButton(); return }
+      }
+      scheduleAndPlay()
+    }, (totalDurSec + params.loopGap) * 1000)
+  } else {
+    restartTimeout = setTimeout(() => {
+      Tone.Transport.stop()
+      setStatus('Finished')
+      isPlaying = false
+      updatePlayButton()
+    }, totalDurSec * 1000 + 500)
+  }
+}
+
+async function startPlay() {
+  if (!samplerReady || !grammarReady) return
+  // Resume AudioContext on user gesture
+  await Tone.start()
+  isPlaying = true
+  updatePlayButton()
+  paramsChanged = false
+  await applyPending()
+  if (!recompute()) { isPlaying = false; updatePlayButton(); return }
+  scheduleAndPlay()
+}
+
+function stopPlay() {
+  clearTimeout(restartTimeout)
+  restartTimeout = null
+  Tone.Transport.cancel()
+  Tone.Transport.stop()
+  Tone.Transport.position = 0
+  isPlaying = false
+  updatePlayButton()
+  setStatus('Stopped')
+}
+
+function updatePlayButton() {
+  document.getElementById('play-btn').disabled = !(samplerReady && grammarReady)
+}
+
+// ─── Reconstruct node text from current params ────────────────────────────────
+function buildNodeText() {
+  const rulesLines = Object.entries(params.rules)
+    .map(([sym, rep]) => `${sym}=${rep}`)
+    .join('\n')
+  return [
+    `%%bd_module lsmusic_module.html`,
+    `%%bd_axiom ${params.axiom}`,
+    `%%bd_rules [`,
+    rulesLines,
+    `%%bd_]`,
+    `%%bd_depth ${params.depth}`,
+    `%%bd_angle ${params.angle}`,
+    `%%bd_scale ${params.scale}`,
+    `%%bd_tempo ${params.tempo}`,
+    `%%bd_octave_centre ${params.octaveCentre}`,
+    `%%bd_loop ${params.loop}`,
+    `%%bd_loop_gap ${params.loopGap}`,
+    `%%bd_reverb_wet ${params.reverbWet.toFixed(2)}`,
+    `%%bd_reverb_decay ${params.reverbDecay.toFixed(1)}`,
+    `%%bd_vibrato_frequency ${params.vibratoFreq.toFixed(1)}`,
+    `%%bd_vibrato_depth ${params.vibratoDepth.toFixed(2)}`,
+    `%%bd_chorus_wet ${params.chorusWet.toFixed(2)}`,
+    `%%bd_chorus_depth ${params.chorusDepth.toFixed(2)}`
+  ].join('\n')
+}
+
+// ─── Apply BD_INIT directives to UI and params ────────────────────────────────
+function applyDirectives(d) {
+  if (d.axiom !== undefined) {
+    params.axiom = d.axiom
+    pending.axiom = d.axiom
+    document.getElementById('axiom-input').value = d.axiom
+  }
+  if (d.rules !== undefined) {
+    const productions = parseRules(d.rules)
+    params.rules = productions
+    pending.rules = productions
+    const rulesText = Object.entries(productions).map(([s,r]) => `${s}=${r}`).join('\n')
+    document.getElementById('rules-area').value = rulesText
+  }
+  if (d.depth !== undefined) {
+    const v = Math.max(1, Math.min(5, parseInt(d.depth) || 4))
+    params.depth = v; pending.depth = v
+    document.getElementById('depth-sel').value = v
+  }
+  if (d.angle !== undefined) {
+    params.angle = parseFloat(d.angle) || 90
+    pending.angle = params.angle
+  }
+  if (d.scale !== undefined && SCALES[d.scale]) {
+    params.scale = d.scale; pending.scale = d.scale
+    document.getElementById('scale-sel').value = d.scale
+  }
+  if (d.tempo !== undefined) {
+    const v = Math.max(40, Math.min(160, parseFloat(d.tempo) || 80))
+    params.tempo = v; pending.tempo = v
+    document.getElementById('tempo-slider').value = v
+    document.getElementById('tempo-val').textContent = Math.round(v) + ' BPM'
+  }
+  if (d.octave_centre !== undefined) {
+    params.octaveCentre = parseInt(d.octave_centre) || 4
+    pending.octaveCentre = params.octaveCentre
+  }
+  if (d.loop !== undefined) {
+    params.loop = d.loop === 'true'
+    pending.loop = params.loop
+  }
+  if (d.loop_gap !== undefined) {
+    params.loopGap = parseFloat(d.loop_gap) || 4
+    pending.loopGap = params.loopGap
+  }
+  // Audio effects
+  const applySlider = (directive, paramKey, elId, valId, fmt) => {
+    if (d[directive] !== undefined) {
+      const v = parseFloat(d[directive])
+      if (!isNaN(v)) {
+        params[paramKey] = v; pending[paramKey] = v
+        document.getElementById(elId).value = v
+        document.getElementById(valId).textContent = fmt(v)
+      }
+    }
+  }
+  applySlider('reverb_wet',        'reverbWet',   'reverb-wet',   'reverb-wet-val',   v => v.toFixed(2))
+  applySlider('reverb_decay',      'reverbDecay', 'reverb-decay', 'reverb-decay-val', v => v.toFixed(1) + 's')
+  applySlider('vibrato_frequency', 'vibratoFreq', 'vibrato-freq', 'vibrato-freq-val', v => v.toFixed(1) + ' Hz')
+  applySlider('vibrato_depth',     'vibratoDepth','vibrato-depth','vibrato-depth-val',v => v.toFixed(2))
+  applySlider('chorus_wet',        'chorusWet',   'chorus-wet',   'chorus-wet-val',   v => v.toFixed(2))
+  applySlider('chorus_depth',      'chorusDepth', 'chorus-depth', 'chorus-depth-val', v => v.toFixed(2))
+}
+
+// ─── postMessage protocol ─────────────────────────────────────────────────────
+// Production: tighten origin to "https://butterflydreaming.info"
+window.addEventListener('message', async (event) => {
+  try {
+    const msg = event.data
+    if (!msg || !msg.type) return
+
+    if (msg.type === 'BD_INIT') {
+      const text = msg.payload?.text || ''
+      const d = parseBD(text)
+      applyDirectives(d)
+
+      const ok = recompute()
+      if (ok) {
+        setStatus(samplerReady ? 'Ready — press Play' : 'Grammar loaded — samples loading…')
+      }
+
+    } else if (msg.type === 'BD_REQUEST_UPDATE') {
+      const text = buildNodeText()
+      window.parent.postMessage({ type: 'BD_UPDATE', payload: { text } }, '*')
+
+    } else if (msg.type === 'BD_STOP') {
+      stopPlay()
+    }
+  } catch (e) {
+    postError('Message handler error: ' + e.message)
+  }
+})
+
+// ─── UI event listeners ───────────────────────────────────────────────────────
+document.getElementById('play-btn').addEventListener('click', async () => {
+  if (isPlaying) stopPlay()
+  await startPlay()
+})
+
+document.getElementById('stop-btn').addEventListener('click', stopPlay)
+
+document.getElementById('copy-btn').addEventListener('click', () => {
+  if (!currentABC) return
+  navigator.clipboard.writeText(currentABC).then(() => {
+    const btn = document.getElementById('copy-btn')
+    btn.textContent = 'Copied!'
+    setTimeout(() => { btn.textContent = 'Copy Music' }, 1500)
+  }).catch(() => {
+    postError('Clipboard write failed')
+  })
+})
+
+// Grammar/playback controls — changes registered in pending, applied at loop boundary
+document.getElementById('depth-sel').addEventListener('change', (e) => {
+  pending.depth = parseInt(e.target.value)
+  paramsChanged = true
+})
+
+document.getElementById('scale-sel').addEventListener('change', (e) => {
+  pending.scale = e.target.value
+  paramsChanged = true
+})
+
+document.getElementById('tempo-slider').addEventListener('input', (e) => {
+  const v = parseFloat(e.target.value)
+  pending.tempo = v
+  document.getElementById('tempo-val').textContent = Math.round(v) + ' BPM'
+  paramsChanged = true
+})
+
+document.getElementById('axiom-input').addEventListener('input', (e) => {
+  pending.axiom = e.target.value.trim()
+  paramsChanged = true
+})
+
+document.getElementById('rules-area').addEventListener('input', (e) => {
+  pending.rules = parseRules(e.target.value)
+  paramsChanged = true
+})
+
+// Audio effect sliders
+function wireSlider(id, valId, paramKey, fmt) {
+  document.getElementById(id).addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value)
+    pending[paramKey] = v
+    document.getElementById(valId).textContent = fmt(v)
+    paramsChanged = true
+  })
+}
+
+wireSlider('reverb-wet',   'reverb-wet-val',   'reverbWet',   v => v.toFixed(2))
+wireSlider('reverb-decay', 'reverb-decay-val', 'reverbDecay', v => v.toFixed(1) + 's')
+wireSlider('vibrato-freq', 'vibrato-freq-val', 'vibratoFreq', v => v.toFixed(1) + ' Hz')
+wireSlider('vibrato-depth','vibrato-depth-val','vibratoDepth',v => v.toFixed(2))
+wireSlider('chorus-wet',   'chorus-wet-val',   'chorusWet',   v => v.toFixed(2))
+wireSlider('chorus-depth', 'chorus-depth-val', 'chorusDepth', v => v.toFixed(2))
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+// Post BD_READY immediately — samples still loading but module is in DOM
+window.parent.postMessage({ type: 'BD_READY' }, '*')
+setStatus('Loading samples…')
+</script>
+</body>
+</html>
