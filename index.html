@@ -145,6 +145,9 @@ Y=+XF-YFY-FX+
       <button id="request-btn">Request Update</button>
     </div>
     <div id="status">—</div>
+
+    <label class="field-label" style="margin-top:14px;">GENERATED ABC <span style="opacity:0.5;font-size:0.85em;">(debug — read only)</span></label>
+    <textarea id="abc-display" readonly spellcheck="false" style="height:160px;opacity:0.6;cursor:default;"></textarea>
   </div>
 
   <div class="right">
@@ -187,6 +190,9 @@ Y=+XF-YFY-FX+
           break
         case 'BD_UPDATE':
           textarea.value = msg.payload.text
+          if (msg.payload.generatedABC) {
+            document.getElementById('abc-display').value = msg.payload.generatedABC
+          }
           setStatus('Received update from module')
           break
         case 'BD_ERROR':

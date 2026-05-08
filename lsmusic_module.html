@@ -604,25 +604,78 @@ async function applyPending() {
   await reverb.ready
 }
 
+// ─── ABC → schedule events (A2 Part B) ────────────────────────────────────────
+// Parse the generated ABC string to derive pitch and duration for Tone.js.
+// The ABC is the single source of truth; durations are not recalculated here.
+// Format assumptions: L:1/8, Q:1/8=tempo, K:C, no key-sig accidentals,
+// notes as [^_]?[A-Ga-g][,']*(n)? with ties (-) for bar-spanning runs.
+function scheduleFromABC(abcText, tempo) {
+  const secPerUnit = 60 / tempo  // one eighth-note (L:1/8, Q:1/8=tempo)
+  const lines = abcText.split('\n')
+  const bodyStart = lines.findIndex(l => l.startsWith('K:')) + 1
+  if (bodyStart === 0) return null
+  const body = lines.slice(bodyStart).join('\n')
+
+  const events = []
+  let t = 0
+  const NOTE_RE = /(\^{1,2}|_{1,2}|=)?([A-Ga-gz])([,']*)(\d+)?(-)?/g
+  let m
+  while ((m = NOTE_RE.exec(body)) !== null) {
+    const [, acc, letter, octMod, lenStr, tie] = m
+    const len = lenStr ? parseInt(lenStr) : 1
+    const durSec = len * secPerUnit
+
+    if (letter === 'z' || letter === 'Z') { t += durSec; continue }
+
+    let octave = (letter === letter.toUpperCase()) ? 4 : 5
+    octave -= (octMod.match(/,/g) || []).length
+    octave += (octMod.match(/'/g) || []).length
+
+    const base = letter.toUpperCase()
+    let noteName = acc === '^' ? base + '#' : acc === '_' ? base + 'b' : base
+    const flatToSharp = { Cb:'B', Db:'C#', Eb:'D#', Fb:'E', Gb:'F#', Ab:'G#', Bb:'A#' }
+    if (flatToSharp[noteName]) noteName = flatToSharp[noteName]
+
+    if (tie && events.length > 0) {
+      // Tie continuation: merge duration into the note this ties from
+      events[events.length - 1].durSec += durSec
+      t += durSec
+      continue
+    }
+
+    events.push({ pitch: `${noteName}${octave}`, durSec, timeOffset: t })
+    t += durSec
+  }
+  return events.length > 0 ? events : null
+}
+
 // ─── Scheduling & loop ────────────────────────────────────────────────────────
 function scheduleAndPlay() {
   Tone.Transport.cancel()
   Tone.Transport.stop()
   Tone.Transport.position = 0
 
-  const baseDurSec = 60 / params.tempo  // duration of one F step
-  let timeOffset = 0
+  // Derive schedule from the ABC (A2 Part B); fall back to currentNotes if parse fails
+  let events = scheduleFromABC(currentABC, params.tempo)
+  if (!events) {
+    const base = 60 / params.tempo
+    let t = 0
+    events = currentNotes.map(n => {
+      const ev = { pitch: n.pitch, durSec: n.runLength * base, timeOffset: t }
+      t += ev.durSec
+      return ev
+    })
+  }
 
-  currentNotes.forEach((note) => {
-    const dur = note.runLength * baseDurSec
-    const t = timeOffset
+  events.forEach(ev => {
     Tone.Transport.schedule((time) => {
-      sampler.triggerAttackRelease(note.pitch, dur * 0.92, time)
-    }, t)
-    timeOffset += dur
+      sampler.triggerAttackRelease(ev.pitch, ev.durSec * 0.92, time)
+    }, ev.timeOffset)
   })
 
-  const totalDurSec = timeOffset
+  const totalDurSec = events.length > 0
+    ? events[events.length - 1].timeOffset + events[events.length - 1].durSec
+    : 0
 
   Tone.Transport.start()
   setStatus('Playing')
@@ -784,7 +837,8 @@ window.addEventListener('message', async (event) => {
 
     } else if (msg.type === 'BD_REQUEST_UPDATE') {
       const text = buildNodeText()
-      window.parent.postMessage({ type: 'BD_UPDATE', payload: { text } }, '*')
+      // generatedABC is a debug field — not written back into node text (A2 Part A)
+      window.parent.postMessage({ type: 'BD_UPDATE', payload: { text, generatedABC: currentABC } }, '*')
 
     } else if (msg.type === 'BD_STOP') {
       stopPlay()
