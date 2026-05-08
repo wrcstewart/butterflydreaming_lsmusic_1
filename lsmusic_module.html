@@ -833,6 +833,8 @@ window.addEventListener('message', async (event) => {
       const ok = recompute()
       if (ok) {
         setStatus(samplerReady ? 'Ready — press Play' : 'Grammar loaded — samples loading…')
+        // A3: push ABC to harness immediately so debug display populates on Send to Player
+        window.parent.postMessage({ type: 'BD_UPDATE', payload: { text: buildNodeText(), generatedABC: currentABC } }, '*')
       }
 
     } else if (msg.type === 'BD_REQUEST_UPDATE') {
