@@ -177,10 +177,8 @@ Y=+XF-YFY-FX+
   const scriptParam = new URLSearchParams(window.location.search).get('script')
   if (scriptParam) {
     textarea.value = scriptParam
-    setStatus('DEBUG: loaded from URL param — ' + scriptParam.length + ' chars')
   } else {
-    textarea.value = 'DEBUG: no ?script= param found in URL'
-    setStatus('DEBUG: no script param')
+    textarea.value = DEFAULT_SCRIPT
   }
 
   function setStatus(msg) {
@@ -219,9 +217,7 @@ Y=+XF-YFY-FX+
   })
 
   document.getElementById('copy-link-btn').addEventListener('click', () => {
-    const script = textarea.value
-    setStatus(`DEBUG: encoding ${script.length} chars`)
-    const url = `https://wrcstewart.github.io/butterflydreaming_lsmusic_1/?script=${encodeURIComponent(script)}`
+    const url = `https://wrcstewart.github.io/butterflydreaming_lsmusic_1/?script=${encodeURIComponent(textarea.value)}`
     navigator.clipboard.writeText(url).then(() => {
       flashBtn(document.getElementById('copy-link-btn'), 'Link Copied ✓')
     }).catch(() => {
