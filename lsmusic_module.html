@@ -415,7 +415,20 @@ function buildNotes(axiom, productions, depth, angleDeg, scaleName, octaveCentre
     i += run
   }
 
-  return notes
+  return mergeConsecutivePitches(notes)
+}
+
+function mergeConsecutivePitches(notes) {
+  if (notes.length === 0) return []
+  const merged = []
+  for (const note of notes) {
+    if (merged.length > 0 && merged[merged.length - 1].pitch === note.pitch) {
+      merged[merged.length - 1].runLength += note.runLength
+    } else {
+      merged.push({ ...note })
+    }
+  }
+  return merged
 }
 
 // ─── ABC generation (internal, for Copy Music) ────────────────────────────────
