@@ -331,37 +331,22 @@ const MIDI_MIN = pitchToMidi('F#', 2)  // 42
 const MIDI_MAX = pitchToMidi('E', 4)   // 64
 
 function mapYToPitch(y, yMin, yMax, scaleName, octaveCentre) {
-  if (yMax === yMin) {
-    return `C${octaveCentre}`
-  }
+  if (yMax === yMin) return `C${octaveCentre}`
   const yNorm = (y - yMin) / (yMax - yMin)  // [0, 1]
-  // Map across 4-octave span centred on octaveCentre
-  // yMin → octaveCentre-2, yMax → octaveCentre+2
-  const spanSemitones = 48
-  const semitonePos = yNorm * spanSemitones  // [0, 48)
-
-  const octaveOffset = Math.floor(semitonePos / 12)
-  const semitoneInOctave = semitonePos % 12
-
+  // Map linearly across the sample range then snap to nearest in-scale MIDI note.
+  // The prior 48-semitone span caused ~42% of notes to clamp to E4 (MIDI_MAX).
+  const midiRaw = MIDI_MIN + yNorm * (MIDI_MAX - MIDI_MIN)  // [42.0, 64.0]
   const degrees = SCALES[scaleName] || SCALES.pentatonic
-  let nearest = degrees[0]
+  let bestMidi = MIDI_MIN
   let minDist = Infinity
-  for (const d of degrees) {
-    const dist = Math.min(
-      Math.abs(semitoneInOctave - d),
-      Math.abs(semitoneInOctave - (d + 12))
-    )
-    if (dist < minDist) { minDist = dist; nearest = d }
+  for (let m = MIDI_MIN; m <= MIDI_MAX; m++) {
+    if (degrees.includes(m % 12)) {
+      const dist = Math.abs(midiRaw - m)
+      if (dist < minDist) { minDist = dist; bestMidi = m }
+    }
   }
-
-  let octave = (octaveCentre - 2) + octaveOffset
-  let noteIdx = nearest
-
-  // Clamp to F#2..E4
-  let midi = (octave + 1) * 12 + noteIdx
-  midi = Math.max(MIDI_MIN, Math.min(MIDI_MAX, midi))
-  const { note, octave: clampedOct } = midiToPitch(midi)
-  return `${note}${clampedOct}`
+  const { note, octave } = midiToPitch(bestMidi)
+  return `${note}${octave}`
 }
 
 // ─── Turtle interpreter — per-step horizontal segment list (A5) ───────────────
@@ -425,12 +410,11 @@ function buildNotes(axiom, productions, depth, angleDeg, scaleName, octaveCentre
   while (i < segs.length) {
     let run = 1
     while (i + run < segs.length && segs[i + run].consecutive === true) run++
-    notes.push({
-      pitch: mapYToPitch(segs[i].y, yMin, yMax, scaleName, octaveCentre),
-      runLength: run
-    })
+    const pitch = mapYToPitch(segs[i].y, yMin, yMax, scaleName, octaveCentre)
+    notes.push({ pitch, runLength: run })
     i += run
   }
+
   return notes
 }
 
