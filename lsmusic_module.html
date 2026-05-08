@@ -364,64 +364,69 @@ function mapYToPitch(y, yMin, yMax, scaleName, octaveCentre) {
   return `${note}${clampedOct}`
 }
 
-// ─── Turtle interpreter ────────────────────────────────────────────────────────
-function runTurtle(lstring, angleDeg) {
+// ─── Turtle interpreter — horizontal run accumulator (A1) ─────────────────────
+// Prusinkiewicz §6.3: consecutive horizontal F steps form a single note whose
+// duration is proportional to run length. Turns, vertical steps, and stack ops
+// all terminate the current run.
+function buildRuns(lstring, angleDeg) {
   let x = 0, y = 0, angle = 0
   const stack = []
-  const segments = []
+  const runs = []
+  let currentRun = null  // { y, count }
+
+  const endRun = () => {
+    if (currentRun !== null) { runs.push(currentRun); currentRun = null }
+  }
 
   for (const ch of lstring) {
     if (ch === 'F') {
       const rad = angle * Math.PI / 180
       const nx = x + Math.cos(rad)
       const ny = y + Math.sin(rad)
-      segments.push({ x1: x, y1: y, x2: nx, y2: ny })
-      x = nx
-      y = ny
-    } else if (ch === '+') {
-      angle += angleDeg
-    } else if (ch === '-') {
-      angle -= angleDeg
-    } else if (ch === '[') {
-      stack.push({ x, y, angle })
-    } else if (ch === ']') {
-      if (stack.length > 0) {
-        const s = stack.pop()
-        x = s.x; y = s.y; angle = s.angle
+      if (Math.abs(ny - y) < 0.001) {
+        // Horizontal step — extend or start a run
+        if (currentRun !== null) {
+          currentRun.count++
+        } else {
+          currentRun = { y: (y + ny) / 2, count: 1 }
+        }
+      } else {
+        // Vertical step — terminate any open run, produce no note
+        endRun()
       }
+      x = nx; y = ny
+    } else if (ch === '+') {
+      endRun(); angle += angleDeg
+    } else if (ch === '-') {
+      endRun(); angle -= angleDeg
+    } else if (ch === '[') {
+      endRun(); stack.push({ x, y, angle })
+    } else if (ch === ']') {
+      endRun()
+      if (stack.length > 0) { const s = stack.pop(); x = s.x; y = s.y; angle = s.angle }
     }
   }
-  return segments
-}
-
-// ─── Segment classification ────────────────────────────────────────────────────
-// Returns array of Y values for each horizontal segment (vertical segments skipped)
-function classifyHorizontalY(segments) {
-  const TOL = 0.001
-  const yValues = []
-  for (const seg of segments) {
-    if (Math.abs(seg.y2 - seg.y1) < TOL) {
-      yValues.push((seg.y1 + seg.y2) / 2)
-    }
-  }
-  return yValues
+  endRun()
+  return runs  // [{ y: number, count: number }, ...]
 }
 
 // ─── Build note array ──────────────────────────────────────────────────────────
+// Returns [{ pitch: string, runLength: number }, ...]
 function buildNotes(axiom, productions, depth, angleDeg, scaleName, octaveCentre) {
   const lsystem = new LSystem({ axiom, productions })
   lsystem.iterate(depth)
   const lstring = lsystem.getString()
 
-  const segments = runTurtle(lstring, angleDeg)
-  const yValues = classifyHorizontalY(segments)
+  const runs = buildRuns(lstring, angleDeg)
+  if (runs.length === 0) return []
 
-  if (yValues.length === 0) return []
+  const yMin = Math.min(...runs.map(r => r.y))
+  const yMax = Math.max(...runs.map(r => r.y))
 
-  const yMin = Math.min(...yValues)
-  const yMax = Math.max(...yValues)
-
-  return yValues.map(y => mapYToPitch(y, yMin, yMax, scaleName, octaveCentre))
+  return runs.map(r => ({
+    pitch: mapYToPitch(r.y, yMin, yMax, scaleName, octaveCentre),
+    runLength: r.count
+  }))
 }
 
 // ─── ABC generation (internal, for Copy Music) ────────────────────────────────
@@ -444,29 +449,40 @@ function toneToABC(tonePitch) {
 }
 
 function buildABC(notes, tempo) {
-  const abcNotes = notes.map(toneToABC)
-  let abc = `X:1\nT:L-System Fragment\nM:4/4\nL:1/4\nQ:1/4=${Math.round(tempo)}\nK:C\n`
-  // Group into bars of 4 beats, bars grouped in lines of 4
-  let line = '|'
-  let beatCount = 0
-  let barCount = 0
-  for (let i = 0; i < abcNotes.length; i++) {
-    line += abcNotes[i]
-    beatCount++
-    if (beatCount === 4) {
-      line += '|'
-      beatCount = 0
-      barCount++
-      if (barCount % 4 === 0) {
-        abc += line + '\n'
-        line = '|'
+  // L:1/8 — one F step = one eighth note. Q:1/8=tempo gives correct playback speed.
+  // 4/4 bar = 8 eighth notes. Notes with runLength > 1 span multiple units.
+  let abc = `X:1\nT:L-System Fragment\nM:4/4\nL:1/8\nQ:1/8=${Math.round(tempo)}\nK:C\n`
+  const BAR = 8
+  let line = '|', units = 0, barCount = 0
+
+  const flushBar = () => {
+    line += '|'; barCount++
+    if (barCount % 4 === 0) { abc += line + '\n'; line = '|' }
+    units = 0
+  }
+
+  for (const note of notes) {
+    const p = toneToABC(note.pitch)
+    let rem = note.runLength
+    while (rem > 0) {
+      const space = BAR - units
+      if (rem <= space) {
+        line += p + (rem > 1 ? rem : '')
+        units += rem; rem = 0
+        if (units === BAR) flushBar()
+      } else {
+        // Tie across bar line
+        line += p + (space > 1 ? space : '') + '-'
+        rem -= space
+        flushBar()
       }
     }
   }
-  if (beatCount > 0) {
-    while (beatCount < 4) { line += 'z'; beatCount++ }
-    line += '|'
-    abc += line + '\n'
+
+  if (units > 0) {
+    const fill = BAR - units
+    if (fill > 0) line += fill > 1 ? `z${fill}` : 'z'
+    line += '|'; abc += line + '\n'
   } else if (line !== '|') {
     abc += line + '\n'
   }
@@ -594,14 +610,19 @@ function scheduleAndPlay() {
   Tone.Transport.stop()
   Tone.Transport.position = 0
 
-  const noteDurSec = 60 / params.tempo
-  const totalDurSec = currentNotes.length * noteDurSec
+  const baseDurSec = 60 / params.tempo  // duration of one F step
+  let timeOffset = 0
 
-  currentNotes.forEach((pitch, i) => {
+  currentNotes.forEach((note) => {
+    const dur = note.runLength * baseDurSec
+    const t = timeOffset
     Tone.Transport.schedule((time) => {
-      sampler.triggerAttackRelease(pitch, noteDurSec * 0.92, time)
-    }, i * noteDurSec)
+      sampler.triggerAttackRelease(note.pitch, dur * 0.92, time)
+    }, t)
+    timeOffset += dur
   })
+
+  const totalDurSec = timeOffset
 
   Tone.Transport.start()
   setStatus('Playing')
