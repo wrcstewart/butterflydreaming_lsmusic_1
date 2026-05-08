@@ -731,28 +731,38 @@ function updatePlayButton() {
 
 // ─── Reconstruct node text from current params ────────────────────────────────
 function buildNodeText() {
-  const rulesLines = Object.entries(params.rules)
-    .map(([sym, rep]) => `${sym}=${rep}`)
-    .join('\n')
+  // Read live values from DOM controls; fall back to params for fields with no control.
+  const g = id => document.getElementById(id)
+  const depth        = g('depth-sel').value
+  const scale        = g('scale-sel').value
+  const tempo        = parseFloat(g('tempo-slider').value)
+  const axiom        = g('axiom-input').value.trim()
+  const rulesLines   = g('rules-area').value.trim()
+  const reverbWet    = parseFloat(g('reverb-wet').value)
+  const reverbDecay  = parseFloat(g('reverb-decay').value)
+  const vibratoFreq  = parseFloat(g('vibrato-freq').value)
+  const vibratoDepth = parseFloat(g('vibrato-depth').value)
+  const chorusWet    = parseFloat(g('chorus-wet').value)
+  const chorusDepth  = parseFloat(g('chorus-depth').value)
   return [
     `%%bd_module lsmusic_module.html`,
-    `%%bd_axiom ${params.axiom}`,
+    `%%bd_axiom ${axiom}`,
     `%%bd_rules [`,
     rulesLines,
     `%%bd_]`,
-    `%%bd_depth ${params.depth}`,
+    `%%bd_depth ${depth}`,
     `%%bd_angle ${params.angle}`,
-    `%%bd_scale ${params.scale}`,
-    `%%bd_tempo ${params.tempo}`,
+    `%%bd_scale ${scale}`,
+    `%%bd_tempo ${tempo}`,
     `%%bd_octave_centre ${params.octaveCentre}`,
     `%%bd_loop ${params.loop}`,
     `%%bd_loop_gap ${params.loopGap}`,
-    `%%bd_reverb_wet ${params.reverbWet.toFixed(2)}`,
-    `%%bd_reverb_decay ${params.reverbDecay.toFixed(1)}`,
-    `%%bd_vibrato_frequency ${params.vibratoFreq.toFixed(1)}`,
-    `%%bd_vibrato_depth ${params.vibratoDepth.toFixed(2)}`,
-    `%%bd_chorus_wet ${params.chorusWet.toFixed(2)}`,
-    `%%bd_chorus_depth ${params.chorusDepth.toFixed(2)}`
+    `%%bd_reverb_wet ${reverbWet.toFixed(2)}`,
+    `%%bd_reverb_decay ${reverbDecay.toFixed(1)}`,
+    `%%bd_vibrato_frequency ${vibratoFreq.toFixed(1)}`,
+    `%%bd_vibrato_depth ${vibratoDepth.toFixed(2)}`,
+    `%%bd_chorus_wet ${chorusWet.toFixed(2)}`,
+    `%%bd_chorus_depth ${chorusDepth.toFixed(2)}`
   ].join('\n')
 }
 
