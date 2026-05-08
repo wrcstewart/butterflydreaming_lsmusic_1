@@ -695,3 +695,36 @@ If no `script` parameter is present the default node text loads as normal. Auto-
 
 #### No Other Changes
 All other behaviour unchanged.
+
+---
+
+### Amendment 9 — Corrections to Copy Link Encoding and URL Parameter Loading
+
+Two bugs prevented the Copy Link / URL parameter round-trip from working.
+
+#### Bug 1 — Encode: base64 `+` characters corrupted by URL parsing
+
+The original encode was `btoa(unescape(encodeURIComponent(textarea.value)))`. The base64 alphabet includes `+`, `/`, and `=`. When this string was placed directly in the URL without further encoding, `URLSearchParams.get()` applied `application/x-www-form-urlencoded` parsing, which treats `+` as a space. This corrupted the base64 before `atob()` could decode it.
+
+**Fix:** Replace the base64 chain with a direct `encodeURIComponent(textarea.value)`. Simpler, no base64, no `+` ambiguity.
+
+#### Bug 2 — Decode: double percent-decoding of `%%` directives
+
+`URLSearchParams.get()` already percent-decodes the query parameter value once. The script directives begin with `%%`, which `encodeURIComponent` encodes as `%25%25` in the URL. `URLSearchParams.get()` decodes `%25%25` back to `%%` correctly. But the code then called `decodeURIComponent()` a second time on that result. `decodeURIComponent("%%bd_...")` throws `URIError` because `%%` is not a valid percent-escape sequence. This error was silently caught and the textarea was reset to the default script.
+
+**Fix:** Use `scriptParam` directly — no `decodeURIComponent` call. `URLSearchParams.get()` has already done the decoding.
+
+#### Final correct implementation
+
+```javascript
+// Encode (Copy Link button)
+const url = `https://.../?script=${encodeURIComponent(textarea.value)}`
+
+// Decode (page load)
+const scriptParam = new URLSearchParams(window.location.search).get('script')
+if (scriptParam) {
+    textarea.value = scriptParam          // URLSearchParams already decoded it
+} else {
+    textarea.value = DEFAULT_SCRIPT
+}
+```
