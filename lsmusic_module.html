@@ -364,69 +364,75 @@ function mapYToPitch(y, yMin, yMax, scaleName, octaveCentre) {
   return `${note}${clampedOct}`
 }
 
-// ─── Turtle interpreter — horizontal run accumulator (A1) ─────────────────────
-// Prusinkiewicz §6.3: consecutive horizontal F steps form a single note whose
-// duration is proportional to run length. Turns, vertical steps, and stack ops
-// all terminate the current run.
-function buildRuns(lstring, angleDeg) {
+// ─── Turtle interpreter — per-step horizontal segment list (A4) ───────────────
+// Returns [{y, consecutive}] for each horizontal F step.
+// consecutive: true iff the immediately preceding symbol in the string was also
+// a horizontal F step. Any other symbol — turn, vertical F, non-drawing (X/Y),
+// push/pop, or string start — resets the chain to false.
+function buildHorizontalSegments(lstring, angleDeg) {
   let x = 0, y = 0, angle = 0
   const stack = []
-  const runs = []
-  let currentRun = null  // { y, count }
-
-  const endRun = () => {
-    if (currentRun !== null) { runs.push(currentRun); currentRun = null }
-  }
+  const segs = []
+  let prevHorizF = false
 
   for (const ch of lstring) {
     if (ch === 'F') {
       const rad = angle * Math.PI / 180
       const nx = x + Math.cos(rad)
       const ny = y + Math.sin(rad)
-      if (Math.abs(ny - y) < 0.001) {
-        // Horizontal step — extend or start a run
-        if (currentRun !== null) {
-          currentRun.count++
-        } else {
-          currentRun = { y: (y + ny) / 2, count: 1 }
-        }
+      const isHoriz = Math.abs(ny - y) < 0.001
+      if (isHoriz) {
+        segs.push({ y: (y + ny) / 2, consecutive: prevHorizF })
+        prevHorizF = true
       } else {
-        // Vertical step — terminate any open run, produce no note
-        endRun()
+        prevHorizF = false
       }
       x = nx; y = ny
     } else if (ch === '+') {
-      endRun(); angle += angleDeg
+      angle += angleDeg; prevHorizF = false
     } else if (ch === '-') {
-      endRun(); angle -= angleDeg
+      angle -= angleDeg; prevHorizF = false
     } else if (ch === '[') {
-      endRun(); stack.push({ x, y, angle })
+      stack.push({ x, y, angle, prevHorizF }); prevHorizF = false
     } else if (ch === ']') {
-      endRun()
-      if (stack.length > 0) { const s = stack.pop(); x = s.x; y = s.y; angle = s.angle }
+      if (stack.length > 0) {
+        const s = stack.pop()
+        x = s.x; y = s.y; angle = s.angle; prevHorizF = s.prevHorizF
+      }
+    } else {
+      // Non-drawing symbol (X, Y, …): not an F step → reset chain
+      prevHorizF = false
     }
   }
-  endRun()
-  return runs  // [{ y: number, count: number }, ...]
+  return segs  // [{ y: number, consecutive: boolean }, ...]
 }
 
 // ─── Build note array ──────────────────────────────────────────────────────────
 // Returns [{ pitch: string, runLength: number }, ...]
+// Run accumulation follows the A4 algorithm: advance i by run length each step.
 function buildNotes(axiom, productions, depth, angleDeg, scaleName, octaveCentre) {
   const lsystem = new LSystem({ axiom, productions })
   lsystem.iterate(depth)
   const lstring = lsystem.getString()
 
-  const runs = buildRuns(lstring, angleDeg)
-  if (runs.length === 0) return []
+  const segs = buildHorizontalSegments(lstring, angleDeg)
+  if (segs.length === 0) return []
 
-  const yMin = Math.min(...runs.map(r => r.y))
-  const yMax = Math.max(...runs.map(r => r.y))
+  const yMin = Math.min(...segs.map(s => s.y))
+  const yMax = Math.max(...segs.map(s => s.y))
 
-  return runs.map(r => ({
-    pitch: mapYToPitch(r.y, yMin, yMax, scaleName, octaveCentre),
-    runLength: r.count
-  }))
+  const notes = []
+  let i = 0
+  while (i < segs.length) {
+    let run = 1
+    while (i + run < segs.length && segs[i + run].consecutive === true) run++
+    notes.push({
+      pitch: mapYToPitch(segs[i].y, yMin, yMax, scaleName, octaveCentre),
+      runLength: run
+    })
+    i += run
+  }
+  return notes
 }
 
 // ─── ABC generation (internal, for Copy Music) ────────────────────────────────
