@@ -84,7 +84,8 @@
       cursor: pointer;
       letter-spacing: 0.04em;
     }
-    button:hover { background: #4a9b8e22; }
+    button:hover:not(:disabled) { background: #4a9b8e22; }
+    button:disabled { opacity: 0.35; cursor: default; }
     #status {
       font-size: 0.78em;
       color: #e8e8e0;
@@ -120,7 +121,33 @@
 <div class="columns">
   <div class="left">
     <label class="field-label">EXTENDED L-SYSTEM NOTATION</label>
-    <textarea id="ls-input" spellcheck="false">%%bd_module lsmusic_module.html
+    <textarea id="ls-input" spellcheck="false"></textarea>
+
+    <div class="btn-row">
+      <button id="send-btn">Send to Player</button>
+      <button id="request-btn">Request Update</button>
+    </div>
+    <div class="btn-row">
+      <button id="copy-abc-btn" disabled>Copy ABC Score</button>
+      <button id="copy-script-btn">Copy Script</button>
+      <button id="copy-link-btn">Copy Link</button>
+    </div>
+    <div id="status">—</div>
+
+    <label class="field-label" style="margin-top:14px;">GENERATED ABC SCORE <span style="opacity:0.5;font-size:0.85em;">(debug — read only)</span></label>
+    <textarea id="abc-display" readonly spellcheck="false" style="height:160px;opacity:0.6;cursor:default;"></textarea>
+  </div>
+
+  <div class="right">
+    <iframe id="lsmusic-module" src="lsmusic_module.html" width="600" height="500"></iframe>
+  </div>
+</div>
+
+<script>
+  // ButterflyDreaming harness — postMessage protocol v0.1
+  // Production: tighten origin to "https://butterflydreaming.info"
+
+  const DEFAULT_SCRIPT = `%%bd_module lsmusic_module.html
 %%bd_axiom X
 %%bd_rules [
 X=-YF+XFX+FY-
@@ -138,30 +165,25 @@ Y=+XF-YFY-FX+
 %%bd_vibrato_frequency 5.0
 %%bd_vibrato_depth 0.2
 %%bd_chorus_wet 0.3
-%%bd_chorus_depth 0.4</textarea>
-
-    <div class="btn-row">
-      <button id="send-btn">Send to Player</button>
-      <button id="request-btn">Request Update</button>
-    </div>
-    <div id="status">—</div>
-
-    <label class="field-label" style="margin-top:14px;">GENERATED ABC <span style="opacity:0.5;font-size:0.85em;">(debug — read only)</span></label>
-    <textarea id="abc-display" readonly spellcheck="false" style="height:160px;opacity:0.6;cursor:default;"></textarea>
-  </div>
-
-  <div class="right">
-    <iframe id="lsmusic-module" src="lsmusic_module.html" width="600" height="500"></iframe>
-  </div>
-</div>
-
-<script>
-  // ButterflyDreaming harness — postMessage protocol v0.1
-  // Production: tighten origin to "https://butterflydreaming.info"
+%%bd_chorus_depth 0.4`
 
   const iframe = document.getElementById('lsmusic-module')
   const textarea = document.getElementById('ls-input')
   const statusEl = document.getElementById('status')
+  const abcDisplay = document.getElementById('abc-display')
+  const copyAbcBtn = document.getElementById('copy-abc-btn')
+
+  // A8.3 — load from URL param or default; auto-send fires on BD_READY
+  const scriptParam = new URLSearchParams(window.location.search).get('script')
+  if (scriptParam) {
+    try {
+      textarea.value = decodeURIComponent(atob(scriptParam))
+    } catch (e) {
+      textarea.value = DEFAULT_SCRIPT
+    }
+  } else {
+    textarea.value = DEFAULT_SCRIPT
+  }
 
   function setStatus(msg) {
     statusEl.textContent = msg
@@ -180,6 +202,31 @@ Y=+XF-YFY-FX+
     setStatus('Requested update from player…')
   })
 
+  // A8.2 — copy buttons
+  function flashBtn(btn, label) {
+    const orig = btn.textContent
+    btn.textContent = label
+    setTimeout(() => { btn.textContent = orig }, 1500)
+  }
+
+  document.getElementById('copy-abc-btn').addEventListener('click', () => {
+    if (!abcDisplay.value) return
+    navigator.clipboard.writeText(abcDisplay.value)
+    flashBtn(copyAbcBtn, 'Copied ✓')
+  })
+
+  document.getElementById('copy-script-btn').addEventListener('click', () => {
+    navigator.clipboard.writeText(textarea.value)
+    flashBtn(document.getElementById('copy-script-btn'), 'Copied ✓')
+  })
+
+  document.getElementById('copy-link-btn').addEventListener('click', () => {
+    const encoded = btoa(unescape(encodeURIComponent(textarea.value)))
+    const url = `https://wrcstewart.github.io/butterflydreaming_lsmusic_1/?script=${encoded}`
+    navigator.clipboard.writeText(url)
+    flashBtn(document.getElementById('copy-link-btn'), 'Link Copied ✓')
+  })
+
   window.addEventListener('message', (event) => {
     try {
       const msg = event.data
@@ -187,11 +234,13 @@ Y=+XF-YFY-FX+
       switch (msg.type) {
         case 'BD_READY':
           setStatus('Module ready')
+          sendInit()  // auto-populate player with current script (no autoplay)
           break
         case 'BD_UPDATE':
           textarea.value = msg.payload.text
           if (msg.payload.generatedABC) {
-            document.getElementById('abc-display').value = msg.payload.generatedABC
+            abcDisplay.value = msg.payload.generatedABC
+            copyAbcBtn.disabled = false
           }
           setStatus('Received update from module')
           break
