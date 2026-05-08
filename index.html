@@ -176,13 +176,8 @@ Y=+XF-YFY-FX+
   // A8.3 — load from URL param or default; auto-send fires on BD_READY
   const scriptParam = new URLSearchParams(window.location.search).get('script')
   if (scriptParam) {
-    try {
-      textarea.value = decodeURIComponent(scriptParam)
-      setStatus('DEBUG: loaded from URL param OK — param length ' + scriptParam.length)
-    } catch (e) {
-      textarea.value = `DEBUG: decode failed — ${e.message}\n\nraw param (first 200 chars):\n${scriptParam.slice(0, 200)}`
-      setStatus('DEBUG: decode threw ' + e.message)
-    }
+    textarea.value = scriptParam
+    setStatus('DEBUG: loaded from URL param — ' + scriptParam.length + ' chars')
   } else {
     textarea.value = 'DEBUG: no ?script= param found in URL'
     setStatus('DEBUG: no script param')
