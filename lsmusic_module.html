@@ -364,11 +364,12 @@ function mapYToPitch(y, yMin, yMax, scaleName, octaveCentre) {
   return `${note}${clampedOct}`
 }
 
-// ─── Turtle interpreter — per-step horizontal segment list (A4) ───────────────
+// ─── Turtle interpreter — per-step horizontal segment list (A5) ───────────────
 // Returns [{y, consecutive}] for each horizontal F step.
-// consecutive: true iff the immediately preceding symbol in the string was also
-// a horizontal F step. Any other symbol — turn, vertical F, non-drawing (X/Y),
-// push/pop, or string start — resets the chain to false.
+// consecutive: true iff the run has not been broken since the last horizontal F.
+// Only turns (+ or -) and vertical F steps break a run.
+// Non-drawing symbols (X, Y, …), push ([), and pop (]) are transparent —
+// they do not change the turtle heading so they cannot break a run.
 function buildHorizontalSegments(lstring, angleDeg) {
   let x = 0, y = 0, angle = 0
   const stack = []
@@ -385,24 +386,22 @@ function buildHorizontalSegments(lstring, angleDeg) {
         segs.push({ y: (y + ny) / 2, consecutive: prevHorizF })
         prevHorizF = true
       } else {
-        prevHorizF = false
+        prevHorizF = false   // vertical F breaks the run
       }
       x = nx; y = ny
     } else if (ch === '+') {
-      angle += angleDeg; prevHorizF = false
+      angle += angleDeg; prevHorizF = false   // turn breaks the run
     } else if (ch === '-') {
-      angle -= angleDeg; prevHorizF = false
+      angle -= angleDeg; prevHorizF = false   // turn breaks the run
     } else if (ch === '[') {
-      stack.push({ x, y, angle, prevHorizF }); prevHorizF = false
+      stack.push({ x, y, angle })   // prevHorizF not saved — transparent
     } else if (ch === ']') {
       if (stack.length > 0) {
-        const s = stack.pop()
-        x = s.x; y = s.y; angle = s.angle; prevHorizF = s.prevHorizF
+        const s = stack.pop(); x = s.x; y = s.y; angle = s.angle
       }
-    } else {
-      // Non-drawing symbol (X, Y, …): not an F step → reset chain
-      prevHorizF = false
+      // prevHorizF unchanged — pop is transparent to run accumulation
     }
+    // All other symbols (X, Y, …): transparent — prevHorizF unchanged
   }
   return segs  // [{ y: number, consecutive: boolean }, ...]
 }
