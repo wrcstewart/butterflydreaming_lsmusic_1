@@ -1,3 +1,4 @@
+
 # ButterflyDreaming L-System Music Module — Specification v0.1
 
 ## Overview
@@ -401,3 +402,296 @@ Stop playback immediately, set status to `Stopped`.
 
 *Amendments to be recorded here as they are made, following the same convention
 as `VISUAL_MODULE_SPEC.md` and `MUSIC_MODULE_SPEC.md`.*
+
+
+Good thinking. Here it is:
+
+---
+
+### Amendment 1 — Correct Duration Mapping to Prusinkiewicz Method
+
+The initial implementation treated every horizontal `F` segment as a note of equal duration. This is incorrect. The Prusinkiewicz method (section 6.3, Figure 6.9) states explicitly that note duration is proportional to segment length, where segment length is the count of consecutive horizontal `F` steps forming a continuous horizontal run.
+
+#### Corrected Segment Classification
+
+During turtle interpretation, do not emit a note per `F` step. Instead, accumulate consecutive horizontal `F` steps into runs. A run ends when any of the following occurs:
+
+- A turn symbol (`+` or `−`) is encountered
+- A vertical `F` step occurs (i.e. the heading is vertical at that point)
+- The string is exhausted
+
+Each completed horizontal run produces exactly one note.
+
+#### Corrected Duration Mapping
+
+The duration of the note produced by a horizontal run is proportional to the number of `F` steps in that run:
+
+```
+note_duration_seconds = run_length × (60 / %%bd_tempo)
+```
+
+A run of length 1 produces a quaver-equivalent, length 2 a crotchet-equivalent, and so on. All durations scale with tempo as before.
+
+#### ABC Generation
+
+Express variable note lengths correctly in the generated ABC notation. A run of length `n` at the base `L:1/8` unit produces a note of length `n` in ABC terms (e.g. `C2` for length 2, `C4` for length 4).
+
+#### No Other Changes
+
+Pitch mapping, scale lookup, Y normalisation, and all other behaviour are unchanged.
+Good pragmatic approach — fix one thing at a time and get proper visibility of what's being generated.
+
+Here is Amendment 2:
+
+---
+
+### Amendment 2 — ABC Debug Display and Note Duration Fix
+
+#### Part A — ABC Debug Display
+
+Add a read-only text area below the script input box in `index.html` labelled `GENERATED ABC`. This text area:
+
+- Is populated every time the module posts a `BD_UPDATE` message containing a `generatedABC` field
+- Is read-only but selectable and scrollable
+- Has sufficient height to show approximately 10 lines without scrolling
+- Is clearly labelled as debug output
+
+In `lsmusic_module.html`, include the generated ABC string as an additional field `generatedABC` in every `BD_UPDATE` message payload. This field is for debug purposes only and is not written back into the node text.
+
+#### Part B — Note Duration Fix
+
+The ABC generator must implement run-length accumulation for horizontal segments as specified in Amendment 1. This fix must operate at the ABC generation stage, not at the Tone.js scheduling stage.
+
+Specifically:
+
+- Consecutive horizontal `F` steps at the same Y coordinate without an intervening turn are accumulated into a single run of length `n`
+- The ABC note for that run is expressed as `Xn` where `X` is the pitch letter and `n` is the run length (e.g. `E2`, `G4`)
+- A run of length 1 is expressed without a length suffix (e.g. `E` not `E1`)
+- The Tone.js scheduler must read note durations from the ABC, not recalculate them independently
+
+---
+
+Ready for Claude Code.
+
+Yes — the debug display is the priority, without it we're flying blind.
+
+The most likely cause is that `lsmusic_module.html` is not including `generatedABC` in its `BD_UPDATE` payload, or it is only sending `BD_UPDATE` in response to `BD_REQUEST_UPDATE` rather than also sending it after a successful `BD_INIT` parse.
+
+Here is Amendment 3:
+
+---
+
+### Amendment 3 — Fix ABC Debug Display Population
+
+#### Problem
+The generated ABC text area in `index.html` is not populating when Send to Player is pressed.
+
+#### Fix
+
+In `lsmusic_module.html`, after a successful `BD_INIT` sequence — once the L-system has been iterated, the turtle has run, and the ABC has been generated — immediately post a `BD_UPDATE` message to the parent containing the `generatedABC` field. Do not wait for a `BD_REQUEST_UPDATE`.
+
+```javascript
+window.parent.postMessage({
+  type: 'BD_UPDATE',
+  text: currentNodeText,
+  generatedABC: currentABC
+}, '*');
+```
+
+In `index.html`, the `message` event listener must handle `BD_UPDATE` messages by writing the `generatedABC` field into the debug text area if that field is present.
+
+#### No Other Changes
+All other behaviour is unchanged.
+
+---
+
+Short and targeted — Claude Code should be able to nail this in one pass.
+### Amendment 4 — Implement ABC Run-Length Accumulation Correctly
+
+#### Problem
+The ABC generator is emitting one quaver per `F` step regardless of run length. Amendments 1 and 2 specified run-length accumulation but it has not been implemented correctly in the ABC generation stage.
+
+#### Definition of a Run
+A run is a sequence of consecutive horizontal `F` steps where:
+- All steps are horizontal (heading is 0° or 180° at time of step)
+- No turn symbol (`+` or `−`) intervenes between steps
+- No vertical `F` step intervenes between steps
+
+Two horizontal `F` steps at the same pitch but separated by a turn are **not** a run — they are two separate notes. The pitch match is irrelevant; only the absence of an intervening turn or vertical step defines a run.
+
+#### Required Change — Turtle Interpreter
+During turtle interpretation, each horizontal `F` step must be tagged with a `consecutive` boolean:
+- `true` if the immediately preceding symbol was also a horizontal `F` step
+- `false` if the preceding symbol was a turn, a vertical `F` step, or the start of the string
+
+#### Required Change — ABC Generator
+Replace the current per-step note emission with run-length accumulation:
+
+```javascript
+let i = 0;
+while (i < horizontalSegments.length) {
+    let run = 1;
+    while (i + run < horizontalSegments.length &&
+           horizontalSegments[i + run].consecutive === true) {
+        run++;
+    }
+    // emit note with run length suffix if > 1
+    abc += horizontalSegments[i].pitch + (run > 1 ? run : '') + ' ';
+    i += run;
+}
+```
+
+Note that run accumulation is based solely on the `consecutive` flag — **not** on pitch equality. Two consecutive horizontal steps of different pitches do not form a run; the first step has `consecutive === false` on the second step, breaking the run at that point.
+
+#### Verification
+After this fix, bars 1 and 2 of the depth 4 Hilbert output should no longer read `EEEEEEEE|EEEEEEEE`. Long horizontal traversals at the same Y level should produce notes with length suffixes such as `E4` or `E8` rather than repeated single quavers. The total number of note symbols in the ABC should be significantly less than the total number of `F` steps in the iterated string.
+
+#### No Other Changes
+Pitch mapping, scale lookup, Y normalisation, and all audio rendering are unchanged.
+
+CC's own explanation reveals the actual bug. The fix is resetting runs on **any non-F character** including `X`, `Y` and other non-drawing symbols. But those non-drawing symbols are geometrically invisible — they don't change the turtle heading. So `F X F` where both F steps are horizontal with the same heading **is** a genuine run — the X is transparent.
+
+The rule should be: **only `+` and `−` break a run**. Non-drawing symbols like `X` and `Y` are transparent to run accumulation because they don't change the turtle's heading or position.
+
+For the Hilbert grammar `X=-YF+XFX+FY-`, when iterated the F steps between turns always have X or Y symbols between them — so CC's fix breaks every single run, giving all length-1 notes. That's exactly what we're seeing.
+
+### Amendment 5 — Fix Run-Break Logic
+
+#### Problem
+The `buildHorizontalSegments()` function resets the run counter on any non-F character, including non-drawing symbols such as `X` and `Y`. This incorrectly breaks geometrically contiguous horizontal runs wherever the grammar places structural symbols between F steps.
+
+#### Correct Rule
+A run is broken **only** by:
+- A turn symbol (`+` or `−`)
+- A vertical `F` step (heading is vertical at that point)
+
+Non-drawing symbols (`X`, `Y`, and any other symbol that neither moves the turtle nor changes its heading) are **transparent** to run accumulation and must not reset the run counter.
+
+#### Required Change
+In `buildHorizontalSegments()` or equivalent, change the reset condition from:
+
+```javascript
+// WRONG — resets on any non-F character
+if (symbol !== 'F') prevHorizF = false;
+```
+
+To:
+
+```javascript
+// CORRECT — only turns break a run
+if (symbol === '+' || symbol === '-') prevHorizF = false;
+```
+
+#### Verification
+After this fix, the depth 4 Hilbert output should contain notes with length suffixes. The opening bars should no longer be `EEEEEEEE|EEEEEEEE`.
+
+Exactly right — the pitch mapping is now fixed, giving proper spread. The last remaining issue is the same-pitch merging. Here is Amendment 6:
+
+---
+
+### Amendment 6 — Same-Pitch Note Merging
+
+#### Problem
+The ABC output contains consecutive notes at the same pitch written as separate quavers (e.g. `C C`) rather than a single longer note (e.g. `C2`). This happens because the duration is computed before same-pitch merging.
+
+#### Fix
+After pitch mapping and before ABC generation, add a post-processing pass over the note array that merges consecutive notes of identical pitch into a single note with combined duration:
+
+```javascript
+function mergeConsecutivePitches(notes) {
+  if (notes.length === 0) return [];
+  const merged = [];
+  for (const note of notes) {
+    if (merged.length > 0 && 
+        merged[merged.length - 1].pitch === note.pitch) {
+      merged[merged.length - 1].runLength += note.runLength;
+    } else {
+      merged.push({ ...note });
+    }
+  }
+  return merged;
+}
+```
+
+This pass must run **after** `mapYToPitch()` and **before** `buildABC()`. The ABC generator already handles variable `runLength` correctly via ties across barlines.
+
+#### Expected Result
+No two consecutive notes in the ABC output should share the same pitch letter and octave. `C C` becomes `C2`, `G,G,G,G,` becomes `G,4`, and so on.
+
+#### No Other Changes
+Pitch mapping, scale lookup, turtle interpreter, and audio rendering are unchanged.
+
+The Chinese quality makes sense — pentatonic scale on a recorder timbre with vibrato is very close to a dizi or xiao. A happy accident that fits the BD aesthetic rather well.
+
+On the Request Update bug — this is the same class of issue that appeared in the visual module. The BD_REQUEST_UPDATE handler is probably reconstructing the node text from the original parsed directives rather than reading the current live values from the slider controls.
+
+### Amendment 7 — Fix BD_REQUEST_UPDATE Slider Values
+
+#### Problem
+When `BD_REQUEST_UPDATE` is received, the returned node text does not reflect current slider positions. The handler is reading from stored parsed directive values rather than the live control state.
+
+#### Fix
+In the `BD_REQUEST_UPDATE` handler, reconstruct the node text by reading current values directly from every control element at the moment the request is received:
+
+- Depth selector — read `.value`
+- Scale selector — read `.value`
+- Tempo slider — read `.value`
+- Octave centre — read `.value`
+- Loop checkbox — read `.checked`
+- Loop gap — read `.value`
+- Reverb wet, reverb decay — read `.value`
+- Vibrato frequency, vibrato depth — read `.value`
+- Chorus wet, chorus depth — read `.value`
+- Axiom field — read `.value`
+- Rules textarea — read `.value`
+
+The generated ABC is **not** included in the returned text. The `generatedABC` field is included in the payload for the debug display as per Amendment 2.
+
+#### No Other Changes
+All other behaviour unchanged.
+
+### Amendment 8 — Debug Label, Copy Buttons and URL Parameter Loading
+
+#### 8.1 — Rename Debug Label
+Change the label of the generated ABC text area from `GENERATED ABC` to `GENERATED ABC SCORE`.
+
+#### 8.2 — Add Three Copy Buttons
+Add three buttons in `index.html` positioned below the script textarea, in this order:
+
+**COPY ABC SCORE**
+Copies the current content of the GENERATED ABC SCORE text area to the clipboard. Briefly changes label to `Copied ✓` for 1.5 seconds. Disabled if the text area is empty.
+
+**COPY SCRIPT**
+Copies the current content of the script textarea to the clipboard. Briefly changes label to `Copied ✓` for 1.5 seconds.
+
+**COPY LINK**
+- Takes the current script textarea content
+- Encodes it using `btoa(unescape(encodeURIComponent(text)))`
+- Constructs a URL in the form:
+  `https://wrcstewart.github.io/butterflydreaming_lsmusic_1/?script=BASE64STRING`
+- Copies that URL to the clipboard
+- Briefly changes label to `Link Copied ✓` for 1.5 seconds
+
+#### 8.3 — Load Script from URL Parameter on Startup
+
+On page load the correct sequence must be written as a single linear flow. Do not split into separate initialisation blocks.
+
+> ⚠ **Known sequencing pitfall** — also encountered in the 2D visual module (VISUAL_MODULE_SPEC.md Amendment 12). The URL parameter check must execute before any default script is applied or any auto-send is triggered. The entire sequence must be:
+
+```javascript
+// CORRECT sequence — do not reorder
+const scriptParam = new URLSearchParams(window.location.search).get('script');
+if (scriptParam) {
+    textarea.value = decodeURIComponent(atob(scriptParam));
+} else {
+    textarea.value = DEFAULT_SCRIPT;
+}
+// auto-send fires here using whatever is now in textarea
+// does NOT autoplay — populates player only, respects browser autoplay restrictions
+sendToPlayer();
+```
+
+If no `script` parameter is present the default node text loads as normal. Auto-send populates the player but does **not** trigger playback — the user must press Play, respecting browser autoplay restrictions.
+
+#### No Other Changes
+All other behaviour unchanged.

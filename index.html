@@ -177,12 +177,15 @@ Y=+XF-YFY-FX+
   const scriptParam = new URLSearchParams(window.location.search).get('script')
   if (scriptParam) {
     try {
-      textarea.value = decodeURIComponent(atob(scriptParam))
+      textarea.value = decodeURIComponent(scriptParam)
+      setStatus('DEBUG: loaded from URL param OK — param length ' + scriptParam.length)
     } catch (e) {
-      textarea.value = DEFAULT_SCRIPT
+      textarea.value = `DEBUG: decode failed — ${e.message}\n\nraw param (first 200 chars):\n${scriptParam.slice(0, 200)}`
+      setStatus('DEBUG: decode threw ' + e.message)
     }
   } else {
-    textarea.value = DEFAULT_SCRIPT
+    textarea.value = 'DEBUG: no ?script= param found in URL'
+    setStatus('DEBUG: no script param')
   }
 
   function setStatus(msg) {
@@ -221,10 +224,14 @@ Y=+XF-YFY-FX+
   })
 
   document.getElementById('copy-link-btn').addEventListener('click', () => {
-    const encoded = btoa(unescape(encodeURIComponent(textarea.value)))
-    const url = `https://wrcstewart.github.io/butterflydreaming_lsmusic_1/?script=${encoded}`
-    navigator.clipboard.writeText(url)
-    flashBtn(document.getElementById('copy-link-btn'), 'Link Copied ✓')
+    const script = textarea.value
+    setStatus(`DEBUG: encoding ${script.length} chars`)
+    const url = `https://wrcstewart.github.io/butterflydreaming_lsmusic_1/?script=${encodeURIComponent(script)}`
+    navigator.clipboard.writeText(url).then(() => {
+      flashBtn(document.getElementById('copy-link-btn'), 'Link Copied ✓')
+    }).catch(() => {
+      setStatus('Clipboard write failed — copy the URL from the address bar')
+    })
   })
 
   window.addEventListener('message', (event) => {
