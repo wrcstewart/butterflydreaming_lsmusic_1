@@ -148,21 +148,21 @@
   // Production: tighten origin to "https://butterflydreaming.info"
 
   const DEFAULT_SCRIPT = `%%bd_module lsmusic_module.html
-%%bd_loop true
-%%bd_loop_gap 4
-%%bd_reverb_wet 0.35
-%%bd_reverb_decay 2.5
-%%bd_vibrato_frequency 5.0
-%%bd_vibrato_depth 0.2
-%%bd_chorus_wet 0.3
-%%bd_chorus_depth 0.4
 %%bd_tempo 80
 %%bd_octave_centre 4
+%%bd_loop true
+%%bd_loop_gap 4
+%%bd_reverb_wet 0.00
+%%bd_reverb_decay 0.1
+%%bd_vibrato_frequency 1.0
+%%bd_vibrato_depth 0.00
+%%bd_chorus_wet 0.00
+%%bd_chorus_depth 0.00
 
 %%bd_voice 1
 %%bd_instrument bass_recorder
 %%bd_scale pentatonic
-%%bd_depth 1
+%%bd_depth 2
 %%bd_angle 90
 %%bd_axiom F-F-F-F
 %%bd_rules [
@@ -172,9 +172,9 @@ F=F+FF-FF-F-F+F+FF-F+F-F-FF+FF+
 %%bd_voice 2
 %%bd_instrument salamander_piano
 %%bd_scale pentatonic
-%%bd_depth 1
+%%bd_depth 2
 %%bd_angle 90
-%%bd_axiom GRGRGRG
+%%bd_axiom GRGRGRGLG
 %%bd_rules [
 G=GLGGRGGRGRGLGLGGRGLGRGRGGLGGL
 %%bd_]`
