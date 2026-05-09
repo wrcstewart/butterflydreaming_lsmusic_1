@@ -218,7 +218,7 @@ Y=+XF-YFY-FX+</textarea>
 
 <!-- Voice 2 grammar -->
 <div class="section">
-  <div class="section-title">VOICE 2 — G &lt; &gt;  (forward / turn left / turn right)</div>
+  <div class="section-title">VOICE 2 — G L R  (forward / turn left / turn right)</div>
   <div class="row">
     <div class="field">
       <label>AXIOM</label>
@@ -642,7 +642,7 @@ function recompute() {
       currentNotes2 = buildNotes(
         params2.axiom, params2.rules, params2.depth,
         params2.angle, params2.scale, params.octaveCentre,
-        'G', '<', '>'
+        'G', 'L', 'R'
       )
       if (currentNotes2.length > 0) currentABC2 = buildABC(currentNotes2, params.tempo, 2)
     }
