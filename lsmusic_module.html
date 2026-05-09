@@ -200,9 +200,9 @@
   </div>
 </div>
 
-<!-- Grammar area -->
+<!-- Voice 1 grammar -->
 <div class="section">
-  <div class="section-title">L-SYSTEM GRAMMAR</div>
+  <div class="section-title">VOICE 1 — F + −  (forward / turn left / turn right)</div>
   <div class="row">
     <div class="field">
       <label>AXIOM</label>
@@ -213,6 +213,21 @@
     <label>RULES (one per line, format X=replacement)</label>
     <textarea class="rules-area" id="rules-area" spellcheck="false">X=-YF+XFX+FY-
 Y=+XF-YFY-FX+</textarea>
+  </div>
+</div>
+
+<!-- Voice 2 grammar -->
+<div class="section">
+  <div class="section-title">VOICE 2 — G &lt; &gt;  (forward / turn left / turn right)</div>
+  <div class="row">
+    <div class="field">
+      <label>AXIOM</label>
+      <input type="text" id="axiom-input-2" value="" placeholder="leave blank to disable">
+    </div>
+  </div>
+  <div class="field" style="width:100%;">
+    <label>RULES (one per line, format X=replacement)</label>
+    <textarea class="rules-area" id="rules-area-2" spellcheck="false"></textarea>
   </div>
 </div>
 
@@ -254,8 +269,8 @@ Y=+XF-YFY-FX+</textarea>
 
 <script>
 // ─── BD Parser ────────────────────────────────────────────────────────────────
-// Two-state machine. Single-line: %%bd_name value. Multi-line: %%bd_name [ ... %%bd_]
-function parseBD(text) {
+// Parses a flat block of %%bd_ directives into a plain object.
+function parseBDBlock(text) {
   const directives = {}
   const lines = text.split('\n')
   let state = 'text'
@@ -287,6 +302,28 @@ function parseBD(text) {
     }
   }
   return directives
+}
+
+// Splits script into {shared, voice1, voice2} sections then parses each.
+// Scripts with no %%bd_voice marker are treated as single-voice (all → shared).
+function parseBD(text) {
+  const lines = text.split('\n')
+  const buckets = { shared: [], voice1: [], voice2: [] }
+  let current = 'shared'
+
+  for (const line of lines) {
+    if (line.startsWith('%%bd_voice ')) {
+      current = line.slice(11).trim() === '2' ? 'voice2' : 'voice1'
+    } else {
+      buckets[current].push(line)
+    }
+  }
+
+  return {
+    shared: parseBDBlock(buckets.shared.join('\n')),
+    voice1: parseBDBlock(buckets.voice1.join('\n')),
+    voice2: parseBDBlock(buckets.voice2.join('\n'))
+  }
 }
 
 // ─── Rules parser ──────────────────────────────────────────────────────────────
@@ -355,14 +392,14 @@ function mapYToPitch(y, yMin, yMax, scaleName, octaveCentre) {
 // Only turns (+ or -) and vertical F steps break a run.
 // Non-drawing symbols (X, Y, …), push ([), and pop (]) are transparent —
 // they do not change the turtle heading so they cannot break a run.
-function buildHorizontalSegments(lstring, angleDeg) {
+function buildHorizontalSegments(lstring, angleDeg, fwdSym='F', leftSym='+', rightSym='-') {
   let x = 0, y = 0, angle = 0
   const stack = []
   const segs = []
   let prevHorizF = false
 
   for (const ch of lstring) {
-    if (ch === 'F') {
+    if (ch === fwdSym) {
       const rad = angle * Math.PI / 180
       const nx = x + Math.cos(rad)
       const ny = y + Math.sin(rad)
@@ -371,35 +408,34 @@ function buildHorizontalSegments(lstring, angleDeg) {
         segs.push({ y: (y + ny) / 2, consecutive: prevHorizF })
         prevHorizF = true
       } else {
-        prevHorizF = false   // vertical F breaks the run
+        prevHorizF = false
       }
       x = nx; y = ny
-    } else if (ch === '+') {
-      angle += angleDeg; prevHorizF = false   // turn breaks the run
-    } else if (ch === '-') {
-      angle -= angleDeg; prevHorizF = false   // turn breaks the run
+    } else if (ch === leftSym) {
+      angle += angleDeg; prevHorizF = false
+    } else if (ch === rightSym) {
+      angle -= angleDeg; prevHorizF = false
     } else if (ch === '[') {
-      stack.push({ x, y, angle })   // prevHorizF not saved — transparent
+      stack.push({ x, y, angle })
     } else if (ch === ']') {
       if (stack.length > 0) {
         const s = stack.pop(); x = s.x; y = s.y; angle = s.angle
       }
-      // prevHorizF unchanged — pop is transparent to run accumulation
     }
-    // All other symbols (X, Y, …): transparent — prevHorizF unchanged
+    // All other symbols: transparent — prevHorizF unchanged
   }
-  return segs  // [{ y: number, consecutive: boolean }, ...]
+  return segs
 }
 
 // ─── Build note array ──────────────────────────────────────────────────────────
 // Returns [{ pitch: string, runLength: number }, ...]
 // Run accumulation follows the A4 algorithm: advance i by run length each step.
-function buildNotes(axiom, productions, depth, angleDeg, scaleName, octaveCentre) {
+function buildNotes(axiom, productions, depth, angleDeg, scaleName, octaveCentre, fwdSym='F', leftSym='+', rightSym='-') {
   const lsystem = new LSystem({ axiom, productions })
   lsystem.iterate(depth)
   const lstring = lsystem.getString()
 
-  const segs = buildHorizontalSegments(lstring, angleDeg)
+  const segs = buildHorizontalSegments(lstring, angleDeg, fwdSym, leftSym, rightSym)
   if (segs.length === 0) return []
 
   const yMin = Math.min(...segs.map(s => s.y))
@@ -450,10 +486,8 @@ function toneToABC(tonePitch) {
   return base
 }
 
-function buildABC(notes, tempo) {
-  // L:1/8 — one F step = one eighth note. Q:1/8=tempo gives correct playback speed.
-  // 4/4 bar = 8 eighth notes. Notes with runLength > 1 span multiple units.
-  let abc = `X:1\nT:L-System Fragment\nM:4/4\nL:1/8\nQ:1/8=${Math.round(tempo)}\nK:C\n`
+function buildABC(notes, tempo, voiceNum=1) {
+  let abc = `X:${voiceNum}\nT:L-System Fragment — Voice ${voiceNum}\nM:4/4\nL:1/8\nQ:1/8=${Math.round(tempo)}\nK:C\n`
   const BAR = 8
   let line = '|', units = 0, barCount = 0
 
@@ -498,31 +532,45 @@ const vibrato = new Tone.Vibrato({ frequency: 5, depth: 0.2, type: 'sine' })
 const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.4, wet: 0.3 })
 chorus.start()
 
+const SAMPLE_URLS = {
+  'F#2': 'bass_recorder_Fs2.mp3',
+  'C3':  'bass_recorder_C3.mp3',
+  'G#3': 'bass_recorder_Gs3.mp3',
+  'E4':  'bass_recorder_E4.mp3'
+}
+
 const sampler = new Tone.Sampler({
-  urls: {
-    'F#2': 'bass_recorder_Fs2.mp3',
-    'C3':  'bass_recorder_C3.mp3',
-    'G#3': 'bass_recorder_Gs3.mp3',
-    'E4':  'bass_recorder_E4.mp3'
-  },
+  urls: SAMPLE_URLS,
   baseUrl: './bass-recorder/',
   onload: onSamplerLoaded,
   onerror: (err) => postError('Sample load failed: ' + err)
 })
 
+const sampler2 = new Tone.Sampler({
+  urls: SAMPLE_URLS,
+  baseUrl: './bass-recorder/',
+  onload: onSamplerLoaded,
+  onerror: (err) => postError('Sample 2 load failed: ' + err)
+})
+
 sampler.connect(chorus)
+sampler2.connect(chorus)
 chorus.connect(vibrato)
 vibrato.connect(reverb)
 reverb.toDestination()
 
 // ─── State ────────────────────────────────────────────────────────────────────
+let samplersLoadedCount = 0
 let samplerReady = false
 let grammarReady = false
 let isPlaying = false
 let restartTimeout = null
 let paramsChanged = false
-let currentNotes = []   // array of pitch strings
+let currentNotes = []
 let currentABC = ''
+let currentNotes2 = []
+let currentABC2 = ''
+let hasVoice2 = false
 
 let params = {
   axiom: 'X',
@@ -542,8 +590,11 @@ let params = {
   chorusDepth: 0.4
 }
 
+let params2 = { axiom: '', rules: {}, depth: 4, angle: 90, scale: 'pentatonic' }
+
 // pending UI values (applied at next loop boundary)
 let pending = Object.assign({}, params)
+let pending2 = Object.assign({}, params2)
 
 // ─── Status helpers ────────────────────────────────────────────────────────────
 function setStatus(msg) {
@@ -555,8 +606,10 @@ function postError(msg) {
   try { window.parent.postMessage({ type: 'BD_ERROR', payload: { message: msg } }, '*') } catch(e) {}
 }
 
-// ─── Sample load callback ─────────────────────────────────────────────────────
+// ─── Sample load callback — called once per sampler; both must load ───────────
 async function onSamplerLoaded() {
+  samplersLoadedCount++
+  if (samplersLoadedCount < 2) return
   try {
     await reverb.ready
     samplerReady = true
@@ -580,7 +633,20 @@ function recompute() {
       updatePlayButton()
       return false
     }
-    currentABC = buildABC(currentNotes, params.tempo)
+    currentABC = buildABC(currentNotes, params.tempo, 1)
+
+    // Voice 2 — silent if axiom is empty
+    currentNotes2 = []
+    currentABC2 = ''
+    if (hasVoice2 && params2.axiom) {
+      currentNotes2 = buildNotes(
+        params2.axiom, params2.rules, params2.depth,
+        params2.angle, params2.scale, params.octaveCentre,
+        'G', '<', '>'
+      )
+      if (currentNotes2.length > 0) currentABC2 = buildABC(currentNotes2, params.tempo, 2)
+    }
+
     grammarReady = true
     updatePlayButton()
     document.getElementById('copy-btn').disabled = false
@@ -596,6 +662,11 @@ function recompute() {
 // ─── Apply pending params to live effects ────────────────────────────────────
 async function applyPending() {
   params = Object.assign({}, pending)
+  // Depth and scale sliders override both voices (spec 9.4)
+  params2 = Object.assign({}, pending2, { depth: params.depth, scale: params.scale })
+  pending2.depth = params.depth
+  pending2.scale = params.scale
+
   reverb.wet.value = params.reverbWet
   vibrato.frequency.value = params.vibratoFreq
   vibrato.depth.value = params.vibratoDepth
@@ -657,27 +728,52 @@ function scheduleAndPlay() {
   Tone.Transport.stop()
   Tone.Transport.position = 0
 
-  // Derive schedule from the ABC (A2 Part B); fall back to currentNotes if parse fails
-  let events = scheduleFromABC(currentABC, params.tempo)
-  if (!events) {
+  // Voice 1
+  let events1 = scheduleFromABC(currentABC, params.tempo)
+  if (!events1) {
     const base = 60 / params.tempo
     let t = 0
-    events = currentNotes.map(n => {
+    events1 = currentNotes.map(n => {
       const ev = { pitch: n.pitch, durSec: n.runLength * base, timeOffset: t }
       t += ev.durSec
       return ev
     })
   }
-
-  events.forEach(ev => {
+  events1.forEach(ev => {
     Tone.Transport.schedule((time) => {
       sampler.triggerAttackRelease(ev.pitch, ev.durSec * 0.92, time)
     }, ev.timeOffset)
   })
-
-  const totalDurSec = events.length > 0
-    ? events[events.length - 1].timeOffset + events[events.length - 1].durSec
+  const dur1 = events1.length > 0
+    ? events1[events1.length - 1].timeOffset + events1[events1.length - 1].durSec
     : 0
+
+  // Voice 2
+  let dur2 = 0
+  if (hasVoice2 && currentABC2) {
+    let events2 = scheduleFromABC(currentABC2, params.tempo)
+    if (!events2 && currentNotes2.length > 0) {
+      const base = 60 / params.tempo
+      let t = 0
+      events2 = currentNotes2.map(n => {
+        const ev = { pitch: n.pitch, durSec: n.runLength * base, timeOffset: t }
+        t += ev.durSec
+        return ev
+      })
+    }
+    if (events2) {
+      events2.forEach(ev => {
+        Tone.Transport.schedule((time) => {
+          sampler2.triggerAttackRelease(ev.pitch, ev.durSec * 0.92, time)
+        }, ev.timeOffset)
+      })
+      dur2 = events2.length > 0
+        ? events2[events2.length - 1].timeOffset + events2[events2.length - 1].durSec
+        : 0
+    }
+  }
+
+  const totalDurSec = Math.max(dur1, dur2)
 
   Tone.Transport.start()
   setStatus('Playing')
@@ -731,28 +827,19 @@ function updatePlayButton() {
 
 // ─── Reconstruct node text from current params ────────────────────────────────
 function buildNodeText() {
-  // Read live values from DOM controls; fall back to params for fields with no control.
   const g = id => document.getElementById(id)
   const depth        = g('depth-sel').value
   const scale        = g('scale-sel').value
   const tempo        = parseFloat(g('tempo-slider').value)
-  const axiom        = g('axiom-input').value.trim()
-  const rulesLines   = g('rules-area').value.trim()
   const reverbWet    = parseFloat(g('reverb-wet').value)
   const reverbDecay  = parseFloat(g('reverb-decay').value)
   const vibratoFreq  = parseFloat(g('vibrato-freq').value)
   const vibratoDepth = parseFloat(g('vibrato-depth').value)
   const chorusWet    = parseFloat(g('chorus-wet').value)
   const chorusDepth  = parseFloat(g('chorus-depth').value)
-  return [
+
+  const sharedLines = [
     `%%bd_module lsmusic_module.html`,
-    `%%bd_axiom ${axiom}`,
-    `%%bd_rules [`,
-    rulesLines,
-    `%%bd_]`,
-    `%%bd_depth ${depth}`,
-    `%%bd_angle ${params.angle}`,
-    `%%bd_scale ${scale}`,
     `%%bd_tempo ${tempo}`,
     `%%bd_octave_centre ${params.octaveCentre}`,
     `%%bd_loop ${params.loop}`,
@@ -763,22 +850,74 @@ function buildNodeText() {
     `%%bd_vibrato_depth ${vibratoDepth.toFixed(2)}`,
     `%%bd_chorus_wet ${chorusWet.toFixed(2)}`,
     `%%bd_chorus_depth ${chorusDepth.toFixed(2)}`
-  ].join('\n')
+  ]
+
+  const v1Lines = [
+    `%%bd_voice 1`,
+    `%%bd_scale ${scale}`,
+    `%%bd_depth ${depth}`,
+    `%%bd_angle ${params.angle}`,
+    `%%bd_axiom ${g('axiom-input').value.trim()}`,
+    `%%bd_rules [`,
+    g('rules-area').value.trim(),
+    `%%bd_]`
+  ]
+
+  if (!hasVoice2) {
+    // Single-voice backwards-compat: inline voice 1 directives into shared block
+    return [
+      `%%bd_module lsmusic_module.html`,
+      `%%bd_axiom ${g('axiom-input').value.trim()}`,
+      `%%bd_rules [`,
+      g('rules-area').value.trim(),
+      `%%bd_]`,
+      `%%bd_depth ${depth}`,
+      `%%bd_angle ${params.angle}`,
+      `%%bd_scale ${scale}`,
+      `%%bd_tempo ${tempo}`,
+      `%%bd_octave_centre ${params.octaveCentre}`,
+      `%%bd_loop ${params.loop}`,
+      `%%bd_loop_gap ${params.loopGap}`,
+      `%%bd_reverb_wet ${reverbWet.toFixed(2)}`,
+      `%%bd_reverb_decay ${reverbDecay.toFixed(1)}`,
+      `%%bd_vibrato_frequency ${vibratoFreq.toFixed(1)}`,
+      `%%bd_vibrato_depth ${vibratoDepth.toFixed(2)}`,
+      `%%bd_chorus_wet ${chorusWet.toFixed(2)}`,
+      `%%bd_chorus_depth ${chorusDepth.toFixed(2)}`
+    ].join('\n')
+  }
+
+  const v2Axiom = g('axiom-input-2').value.trim()
+  const v2Rules = g('rules-area-2').value.trim()
+  const v2Lines = [
+    `%%bd_voice 2`,
+    `%%bd_scale ${params2.scale}`,
+    `%%bd_depth ${params2.depth}`,
+    `%%bd_angle ${params2.angle}`,
+    `%%bd_axiom ${v2Axiom}`,
+    `%%bd_rules [`,
+    v2Rules,
+    `%%bd_]`
+  ]
+
+  return [...sharedLines, '', ...v1Lines, '', ...v2Lines].join('\n')
 }
 
 // ─── Apply BD_INIT directives to UI and params ────────────────────────────────
-function applyDirectives(d) {
+// parsed = { shared, voice1, voice2 } from parseBD()
+function applyDirectives(parsed) {
+  // Merge: shared provides defaults; voice1 overrides per-voice fields
+  const d = Object.assign({}, parsed.shared, parsed.voice1)
+
   if (d.axiom !== undefined) {
-    params.axiom = d.axiom
-    pending.axiom = d.axiom
+    params.axiom = d.axiom; pending.axiom = d.axiom
     document.getElementById('axiom-input').value = d.axiom
   }
   if (d.rules !== undefined) {
     const productions = parseRules(d.rules)
-    params.rules = productions
-    pending.rules = productions
-    const rulesText = Object.entries(productions).map(([s,r]) => `${s}=${r}`).join('\n')
-    document.getElementById('rules-area').value = rulesText
+    params.rules = productions; pending.rules = productions
+    document.getElementById('rules-area').value =
+      Object.entries(productions).map(([s,r]) => `${s}=${r}`).join('\n')
   }
   if (d.depth !== undefined) {
     const v = Math.max(1, Math.min(5, parseInt(d.depth) || 4))
@@ -786,8 +925,7 @@ function applyDirectives(d) {
     document.getElementById('depth-sel').value = v
   }
   if (d.angle !== undefined) {
-    params.angle = parseFloat(d.angle) || 90
-    pending.angle = params.angle
+    params.angle = parseFloat(d.angle) || 90; pending.angle = params.angle
   }
   if (d.scale !== undefined && SCALES[d.scale]) {
     params.scale = d.scale; pending.scale = d.scale
@@ -804,14 +942,11 @@ function applyDirectives(d) {
     pending.octaveCentre = params.octaveCentre
   }
   if (d.loop !== undefined) {
-    params.loop = d.loop === 'true'
-    pending.loop = params.loop
+    params.loop = d.loop === 'true'; pending.loop = params.loop
   }
   if (d.loop_gap !== undefined) {
-    params.loopGap = parseFloat(d.loop_gap) || 4
-    pending.loopGap = params.loopGap
+    params.loopGap = parseFloat(d.loop_gap) || 4; pending.loopGap = params.loopGap
   }
-  // Audio effects
   const applySlider = (directive, paramKey, elId, valId, fmt) => {
     if (d[directive] !== undefined) {
       const v = parseFloat(d[directive])
@@ -828,6 +963,29 @@ function applyDirectives(d) {
   applySlider('vibrato_depth',     'vibratoDepth','vibrato-depth','vibrato-depth-val',v => v.toFixed(2))
   applySlider('chorus_wet',        'chorusWet',   'chorus-wet',   'chorus-wet-val',   v => v.toFixed(2))
   applySlider('chorus_depth',      'chorusDepth', 'chorus-depth', 'chorus-depth-val', v => v.toFixed(2))
+
+  // Voice 2
+  const v2 = parsed.voice2
+  hasVoice2 = v2.axiom !== undefined && v2.axiom.trim() !== ''
+  if (hasVoice2) {
+    params2.axiom = v2.axiom.trim(); pending2.axiom = params2.axiom
+    document.getElementById('axiom-input-2').value = params2.axiom
+    if (v2.rules !== undefined) {
+      params2.rules = parseRules(v2.rules); pending2.rules = params2.rules
+      document.getElementById('rules-area-2').value =
+        Object.entries(params2.rules).map(([s,r]) => `${s}=${r}`).join('\n')
+    }
+    if (v2.depth !== undefined) {
+      params2.depth = Math.max(1, Math.min(5, parseInt(v2.depth) || 4))
+      pending2.depth = params2.depth
+    }
+    if (v2.angle !== undefined) {
+      params2.angle = parseFloat(v2.angle) || 90; pending2.angle = params2.angle
+    }
+    if (v2.scale !== undefined && SCALES[v2.scale]) {
+      params2.scale = v2.scale; pending2.scale = v2.scale
+    }
+  }
 }
 
 // ─── postMessage protocol ─────────────────────────────────────────────────────
@@ -846,13 +1004,15 @@ window.addEventListener('message', async (event) => {
       if (ok) {
         setStatus(samplerReady ? 'Ready — press Play' : 'Grammar loaded — samples loading…')
         // A3: push ABC to harness immediately so debug display populates on Send to Player
-        window.parent.postMessage({ type: 'BD_UPDATE', payload: { text: buildNodeText(), generatedABC: currentABC } }, '*')
+        const combinedABC = currentABC2 ? currentABC + '\n\n' + currentABC2 : currentABC
+        window.parent.postMessage({ type: 'BD_UPDATE', payload: { text: buildNodeText(), generatedABC: combinedABC } }, '*')
       }
 
     } else if (msg.type === 'BD_REQUEST_UPDATE') {
       const text = buildNodeText()
       // generatedABC is a debug field — not written back into node text (A2 Part A)
-      window.parent.postMessage({ type: 'BD_UPDATE', payload: { text, generatedABC: currentABC } }, '*')
+      const combinedABC2 = currentABC2 ? currentABC + '\n\n' + currentABC2 : currentABC
+      window.parent.postMessage({ type: 'BD_UPDATE', payload: { text, generatedABC: combinedABC2 } }, '*')
 
     } else if (msg.type === 'BD_STOP') {
       stopPlay()
@@ -872,7 +1032,8 @@ document.getElementById('stop-btn').addEventListener('click', stopPlay)
 
 document.getElementById('copy-btn').addEventListener('click', () => {
   if (!currentABC) return
-  navigator.clipboard.writeText(currentABC).then(() => {
+  const toCopy = currentABC2 ? currentABC + '\n\n' + currentABC2 : currentABC
+  navigator.clipboard.writeText(toCopy).then(() => {
     const btn = document.getElementById('copy-btn')
     btn.textContent = 'Copied!'
     setTimeout(() => { btn.textContent = 'Copy Music' }, 1500)
@@ -906,6 +1067,17 @@ document.getElementById('axiom-input').addEventListener('input', (e) => {
 
 document.getElementById('rules-area').addEventListener('input', (e) => {
   pending.rules = parseRules(e.target.value)
+  paramsChanged = true
+})
+
+document.getElementById('axiom-input-2').addEventListener('input', (e) => {
+  pending2.axiom = e.target.value.trim()
+  hasVoice2 = pending2.axiom !== ''
+  paramsChanged = true
+})
+
+document.getElementById('rules-area-2').addEventListener('input', (e) => {
+  pending2.rules = parseRules(e.target.value)
   paramsChanged = true
 })
 

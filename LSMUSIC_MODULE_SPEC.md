@@ -734,3 +734,199 @@ if (scriptParam) {
 ## Phase 2 — Two Voices
 
 *Work from this point onwards concerns the addition of a second independent voice to the module.*
+
+
+### Amendment 9 — Two-Voice System (Final)
+
+#### Overview
+Extend the L-system music module to support two independent melodic voices rendered simultaneously. The two voices share sliders, sampler effects chain, Tone.js transport, octave centre, and loop controls. Each voice has its own symbol alphabet, turtle instance, axiom, rules, depth, angle, scale, and ABC score. No chord notation is used.
+
+---
+
+#### 9.1 — New Symbol Alphabet for Voice 2
+
+| Symbol | Role | Voice 2 equivalent of |
+|--------|------|----------------------|
+| `G` | Forward step — note if horizontal | `F` |
+| `<` | Turn left by angle | `+` |
+| `>` | Turn right by angle | `-` |
+
+No other symbols need to be declared. Each turtle acts only on its own three active symbols — every other symbol is automatically transparent and ignored. Helper symbols such as X, Y or any other letter may be used freely in grammars without affecting the turtle interpreters.
+
+---
+
+#### 9.2 — Script Structure
+
+The node text is divided into a shared header block followed by one or two voice blocks. The `%%bd_voice` directive opens a new voice block. All directives before the first `%%bd_voice` directive are shared.
+
+```
+%%bd_module lsmusic_module.html
+%%bd_loop true
+%%bd_loop_gap 4
+%%bd_reverb_wet 0.35
+%%bd_reverb_decay 2.5
+%%bd_vibrato_frequency 5.0
+%%bd_vibrato_depth 0.2
+%%bd_chorus_wet 0.3
+%%bd_chorus_depth 0.4
+%%bd_tempo 80
+%%bd_octave_centre 4
+
+%%bd_voice 1
+%%bd_scale pentatonic
+%%bd_depth 1
+%%bd_angle 90
+%%bd_axiom F-F-F-F
+%%bd_rules [
+F=F+FF-FF-F-F+F+FF-F+F-F-FF+FF+
+%%bd_]
+
+%%bd_voice 2
+%%bd_scale blues
+%%bd_depth 1
+%%bd_angle 90
+%%bd_axiom G>G>G>G
+%%bd_rules [
+G=G<GG>GG>G>G<G<GG>G<G>G>GG<GG
+%%bd_]
+```
+
+**Backwards compatibility:** A script with no `%%bd_voice` directive is treated as a single Voice 1 script. Voice 2 is silent. All existing single-voice scripts work without modification.
+
+**Single voice with explicit marker:** `%%bd_voice 1` may appear in a single voice script for clarity — this is valid and equivalent to no marker.
+
+---
+
+#### 9.3 — Directive Parsing
+
+The parser reads the script in two passes:
+
+**Pass 1 — shared directives:** Read all directives before the first `%%bd_voice` line into a shared context. These apply to both voices.
+
+**Pass 2 — voice blocks:** From each `%%bd_voice` line, read directives into that voice's context until the next `%%bd_voice` line or end of script.
+
+Per-voice directives (`%%bd_scale`, `%%bd_depth`, `%%bd_angle`, `%%bd_axiom`, `%%bd_rules`) are set from the voice block. Shared directives (`%%bd_tempo`, `%%bd_reverb_*`, `%%bd_vibrato_*`, `%%bd_chorus_*`, `%%bd_loop`, `%%bd_loop_gap`, `%%bd_octave_centre`) are set from the header block.
+
+---
+
+#### 9.4 — Slider Override Behaviour
+
+Slider values override both voices simultaneously regardless of per-voice script values. Script values are the initial state on BD_INIT; sliders take live control from that point. When a slider is moved:
+
+- Scale slider — overrides scale for both voices
+- Tempo slider — overrides tempo for both voices
+- All effects sliders — apply to both sampler instances
+- Depth selector — overrides depth for both voices
+
+Changes take effect at the next loop boundary as per existing behaviour.
+
+---
+
+#### 9.5 — Two-Turtle Rendering
+
+Each voice's axiom and rules are iterated independently by the lindenmayer library to the voice's own depth. The resulting string is passed through `buildHorizontalSegments()` with the appropriate active symbol set:
+
+- **Turtle 1** acts on `F`, `+`, `-` — every other symbol is transparent
+- **Turtle 2** acts on `G`, `<`, `>` — every other symbol is transparent
+
+Both turtles start at (0, 0) heading East (0°). Each maintains its own x, y, angle state independently.
+
+**Empty voice handling:** If a voice produces no horizontal segments it is silently ignored. No error is raised. This is the normal behaviour for a single-voice script where Voice 2 is absent.
+
+---
+
+#### 9.6 — Pitch Mapping
+
+Apply `mapYToPitch()` independently to each voice using:
+- The voice's own scale (from script, overridden by slider)
+- The shared octave centre
+- Y range normalised independently per voice so each uses the full sampler pitch range
+
+Apply same-pitch run merging (Amendment 6) independently to each voice after pitch mapping.
+
+---
+
+#### 9.7 — Two Separate ABC Scores
+
+Generate two completely independent ABC strings using the existing `buildABC()` function:
+
+**Voice 1:**
+```
+X:1
+T:L-System Fragment — Voice 1
+M:4/4
+L:1/8
+Q:1/8=[tempo]
+K:C
+[notes...]
+```
+
+**Voice 2:**
+```
+X:2
+T:L-System Fragment — Voice 2
+M:4/4
+L:1/8
+Q:1/8=[tempo]
+K:C
+[notes...]
+```
+
+The two scores are completely independent — different note counts, durations, and bar counts are all valid.
+
+---
+
+#### 9.8 — Tone.js Scheduling
+
+Two independent Tone.js Part instances on the shared Tone.Transport:
+
+- **Sampler 1** — plays Voice 1 note sequence
+- **Sampler 2** — plays Voice 2 note sequence
+- Both samplers use the same bass recorder samples and effects chain
+- Both Parts start at `Tone.Transport.start()` simultaneously
+- Both Parts stop and clear together on Stop and on loop boundary recompute
+- Loop boundary is the longer of the two sequence durations — the shorter voice is silent for the remainder
+
+---
+
+#### 9.9 — GENERATED ABC SCORE Display
+
+The debug text area displays both scores separated by a blank line:
+
+```
+[Voice 1 ABC]
+
+[Voice 2 ABC]
+```
+
+If only one voice is present only that score is shown. The COPY ABC SCORE button copies whatever is displayed.
+
+---
+
+#### 9.10 — BD_REQUEST_UPDATE
+
+On `BD_REQUEST_UPDATE` the returned node text reconstructs the full two-voice script from current state — shared header directives first, then each voice block with its current axiom, rules, depth, angle, and scale. Slider values at time of request are written back into the shared header. Generated ABC is not included.
+
+---
+
+#### 9.11 — Looping and Synchronisation
+
+At each loop boundary both voices recompute together if any control has changed. The loop gap silence applies to both voices simultaneously ensuring they never drift apart across iterations.
+
+---
+
+#### Future Architecture Note — Mixed Symbol Sets
+
+In future amendments production rules will be allowed to mix the two symbol alphabets freely — a Voice 1 production may contain `G` symbols and a Voice 2 production may contain `F` symbols. When this is introduced the two voices will share a single combined iterated string rather than two separate strings. The two-turtle rendering model in section 9.5 handles this automatically:
+
+- **Turtle 1** iterates the full combined string ignoring everything except `F`, `+`, `-`
+- **Turtle 2** iterates the full combined string ignoring everything except `G`, `<`, `>`
+
+This requires no change to the rendering pipeline — only the script parsing and L-system iteration step changes. The key architectural insight is that mixing the alphabets in the rules changes the musical relationship between the two voices without requiring any change to the turtle interpreters.
+
+---
+
+#### Known Limitations
+- Both voices use the same sampler timbre — independent timbres are a future amendment
+- Rule intermixing between voices requires a single combined string — deferred to a future amendment
+- No visual rendering — combined visual and music module is a future amendment
