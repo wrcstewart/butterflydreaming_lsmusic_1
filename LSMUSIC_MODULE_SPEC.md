@@ -728,3 +728,9 @@ if (scriptParam) {
     textarea.value = DEFAULT_SCRIPT
 }
 ```
+
+---
+
+## Phase 2 — Two Voices
+
+*Work from this point onwards concerns the addition of a second independent voice to the module.*
