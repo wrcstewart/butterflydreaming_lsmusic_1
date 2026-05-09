@@ -148,8 +148,6 @@
   // Production: tighten origin to "https://butterflydreaming.info"
 
   const DEFAULT_SCRIPT = `%%bd_module lsmusic_module.html
-%%bd_tempo 80
-%%bd_octave_centre 4
 %%bd_loop true
 %%bd_loop_gap 4
 %%bd_reverb_wet 0.35
@@ -158,24 +156,25 @@
 %%bd_vibrato_depth 0.2
 %%bd_chorus_wet 0.3
 %%bd_chorus_depth 0.4
+%%bd_tempo 80
+%%bd_octave_centre 4
 
 %%bd_voice 1
 %%bd_scale pentatonic
-%%bd_depth 4
+%%bd_depth 1
 %%bd_angle 90
-%%bd_axiom X
+%%bd_axiom F-F-F-F
 %%bd_rules [
-X=-YF+XFX+FY-
-Y=+XF-YFY-FX+
+F=F+FF-FF-F-F+F+FF-F+F-F-FF+FF+
 %%bd_]
 
 %%bd_voice 2
-%%bd_scale blues
-%%bd_depth 2
+%%bd_scale pentatonic
+%%bd_depth 1
 %%bd_angle 90
 %%bd_axiom GRGRGRG
 %%bd_rules [
-G=GLGGRGGRGRGLGLGGRGLGRGGLGGL
+G=GLGGRGGRGRGLGLGGRGLGRGRGGLGGL
 %%bd_]`
 
   const iframe = document.getElementById('lsmusic-module')
