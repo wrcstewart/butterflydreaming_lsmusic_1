@@ -363,20 +363,14 @@ function midiToPitch(midi) {
   return { note: NOTE_NAMES[idx], octave }
 }
 
-// F#2 = midi 42, E4 = midi 64 (bass recorder range)
-const MIDI_MIN = pitchToMidi('F#', 2)  // 42
-const MIDI_MAX = pitchToMidi('E', 4)   // 64
-
-function mapYToPitch(y, yMin, yMax, scaleName, octaveCentre) {
+function mapYToPitch(y, yMin, yMax, scaleName, octaveCentre, midiMin=42, midiMax=64) {
   if (yMax === yMin) return `C${octaveCentre}`
   const yNorm = (y - yMin) / (yMax - yMin)  // [0, 1]
-  // Map linearly across the sample range then snap to nearest in-scale MIDI note.
-  // The prior 48-semitone span caused ~42% of notes to clamp to E4 (MIDI_MAX).
-  const midiRaw = MIDI_MIN + yNorm * (MIDI_MAX - MIDI_MIN)  // [42.0, 64.0]
+  const midiRaw = midiMin + yNorm * (midiMax - midiMin)
   const degrees = SCALES[scaleName] || SCALES.pentatonic
-  let bestMidi = MIDI_MIN
+  let bestMidi = midiMin
   let minDist = Infinity
-  for (let m = MIDI_MIN; m <= MIDI_MAX; m++) {
+  for (let m = midiMin; m <= midiMax; m++) {
     if (degrees.includes(m % 12)) {
       const dist = Math.abs(midiRaw - m)
       if (dist < minDist) { minDist = dist; bestMidi = m }
@@ -430,7 +424,7 @@ function buildHorizontalSegments(lstring, angleDeg, fwdSym='F', leftSym='+', rig
 // ─── Build note array ──────────────────────────────────────────────────────────
 // Returns [{ pitch: string, runLength: number }, ...]
 // Run accumulation follows the A4 algorithm: advance i by run length each step.
-function buildNotes(axiom, productions, depth, angleDeg, scaleName, octaveCentre, fwdSym='F', leftSym='+', rightSym='-') {
+function buildNotes(axiom, productions, depth, angleDeg, scaleName, octaveCentre, fwdSym='F', leftSym='+', rightSym='-', midiMin=42, midiMax=64) {
   const lsystem = new LSystem({ axiom, productions })
   lsystem.iterate(depth)
   const lstring = lsystem.getString()
@@ -446,7 +440,7 @@ function buildNotes(axiom, productions, depth, angleDeg, scaleName, octaveCentre
   while (i < segs.length) {
     let run = 1
     while (i + run < segs.length && segs[i + run].consecutive === true) run++
-    const pitch = mapYToPitch(segs[i].y, yMin, yMax, scaleName, octaveCentre)
+    const pitch = mapYToPitch(segs[i].y, yMin, yMax, scaleName, octaveCentre, midiMin, midiMax)
     notes.push({ pitch, runLength: run })
     i += run
   }
@@ -532,35 +526,73 @@ const vibrato = new Tone.Vibrato({ frequency: 5, depth: 0.2, type: 'sine' })
 const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.4, wet: 0.3 })
 chorus.start()
 
-const SAMPLE_URLS = {
-  'F#2': 'bass_recorder_Fs2.mp3',
-  'C3':  'bass_recorder_C3.mp3',
-  'G#3': 'bass_recorder_Gs3.mp3',
-  'E4':  'bass_recorder_E4.mp3'
+const INSTRUMENTS = {
+  bass_recorder: {
+    baseUrl: './bass-recorder/',
+    urls: { 'F#2': 'bass_recorder_Fs2.mp3', 'C3': 'bass_recorder_C3.mp3', 'G#3': 'bass_recorder_Gs3.mp3', 'E4': 'bass_recorder_E4.mp3' },
+    midiMin: 42,
+    midiMax: 64
+  },
+  salamander_piano: {
+    baseUrl: 'https://tonejs.github.io/audio/salamander/',
+    urls: { 'A0': 'A0.mp3', 'C2': 'C2.mp3', 'A2': 'A2.mp3', 'C3': 'C3.mp3', 'A3': 'A3.mp3', 'C4': 'C4.mp3', 'A4': 'A4.mp3', 'C5': 'C5.mp3', 'A5': 'A5.mp3', 'C6': 'C6.mp3', 'A6': 'A6.mp3', 'C7': 'C7.mp3' },
+    midiMin: 21,
+    midiMax: 96
+  }
 }
 
-const sampler = new Tone.Sampler({
-  urls: SAMPLE_URLS,
-  baseUrl: './bass-recorder/',
-  onload: onSamplerLoaded,
-  onerror: (err) => postError('Sample load failed: ' + err)
-})
-
-const sampler2 = new Tone.Sampler({
-  urls: SAMPLE_URLS,
-  baseUrl: './bass-recorder/',
-  onload: onSamplerLoaded,
-  onerror: (err) => postError('Sample 2 load failed: ' + err)
-})
-
-sampler.connect(chorus)
-sampler2.connect(chorus)
 chorus.connect(vibrato)
 vibrato.connect(reverb)
 reverb.toDestination()
 
+let sampler = null
+let sampler2 = null
+let sampler1Ready = false
+let sampler2Ready = false
+
+async function onSamplerLoadComplete() {
+  if (!sampler1Ready || !sampler2Ready) return
+  try {
+    await reverb.ready
+    samplerReady = true
+    setStatus(grammarReady ? 'Ready — press Play' : 'Samples loaded — awaiting script')
+    updatePlayButton()
+  } catch (e) {
+    postError('Reverb initialisation failed: ' + e.message)
+  }
+}
+
+function createSampler(voiceNum, instrumentName) {
+  const instKey = INSTRUMENTS[instrumentName] ? instrumentName : 'bass_recorder'
+  const inst = INSTRUMENTS[instKey]
+  if (voiceNum === 1) {
+    if (sampler) { try { sampler.disconnect(); sampler.dispose() } catch(e) {} }
+    sampler1Ready = false
+    samplerReady = false
+    updatePlayButton()
+    sampler = new Tone.Sampler({
+      urls: inst.urls,
+      baseUrl: inst.baseUrl,
+      onload: () => { sampler1Ready = true; onSamplerLoadComplete() },
+      onerror: (err) => postError('Voice 1 sample load failed: ' + err)
+    })
+    sampler.connect(chorus)
+  } else {
+    if (sampler2) { try { sampler2.disconnect(); sampler2.dispose() } catch(e) {} }
+    sampler2Ready = false
+    samplerReady = false
+    updatePlayButton()
+    sampler2 = new Tone.Sampler({
+      urls: inst.urls,
+      baseUrl: inst.baseUrl,
+      onload: () => { sampler2Ready = true; onSamplerLoadComplete() },
+      onerror: (err) => postError('Voice 2 sample load failed: ' + err)
+    })
+    sampler2.connect(chorus)
+  }
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
-let samplersLoadedCount = 0
 let samplerReady = false
 let grammarReady = false
 let isPlaying = false
@@ -573,9 +605,9 @@ let currentABC2 = ''
 let hasVoice2 = false
 
 let params = {
-  axiom: 'X',
-  rules: { X: '-YF+XFX+FY-', Y: '+XF-YFY-FX+' },
-  depth: 4,
+  axiom: 'F-F-F-F',
+  rules: { F: 'F+FF-FF-F-F+F+FF-F+F-F-FF+FF+' },
+  depth: 1,
   angle: 90,
   scale: 'pentatonic',
   tempo: 80,
@@ -587,10 +619,11 @@ let params = {
   vibratoFreq: 5.0,
   vibratoDepth: 0.2,
   chorusWet: 0.3,
-  chorusDepth: 0.4
+  chorusDepth: 0.4,
+  instrument: 'bass_recorder'
 }
 
-let params2 = { axiom: '', rules: {}, depth: 4, angle: 90, scale: 'pentatonic' }
+let params2 = { axiom: '', rules: {}, depth: 1, angle: 90, scale: 'pentatonic', instrument: 'bass_recorder' }
 
 // pending UI values (applied at next loop boundary)
 let pending = Object.assign({}, params)
@@ -606,26 +639,14 @@ function postError(msg) {
   try { window.parent.postMessage({ type: 'BD_ERROR', payload: { message: msg } }, '*') } catch(e) {}
 }
 
-// ─── Sample load callback — called once per sampler; both must load ───────────
-async function onSamplerLoaded() {
-  samplersLoadedCount++
-  if (samplersLoadedCount < 2) return
-  try {
-    await reverb.ready
-    samplerReady = true
-    setStatus(grammarReady ? 'Ready — press Play' : 'Samples loaded — awaiting script')
-    updatePlayButton()
-  } catch (e) {
-    postError('Reverb initialisation failed: ' + e.message)
-  }
-}
-
 // ─── Compute notes from current grammar ───────────────────────────────────────
 function recompute() {
   try {
+    const inst1 = INSTRUMENTS[params.instrument] || INSTRUMENTS.bass_recorder
     currentNotes = buildNotes(
       params.axiom, params.rules, params.depth,
-      params.angle, params.scale, params.octaveCentre
+      params.angle, params.scale, params.octaveCentre,
+      'F', '+', '-', inst1.midiMin, inst1.midiMax
     )
     if (currentNotes.length === 0) {
       postError('No horizontal segments found — no notes to play')
@@ -639,10 +660,11 @@ function recompute() {
     currentNotes2 = []
     currentABC2 = ''
     if (hasVoice2 && params2.axiom) {
+      const inst2 = INSTRUMENTS[params2.instrument] || INSTRUMENTS.bass_recorder
       currentNotes2 = buildNotes(
         params2.axiom, params2.rules, params2.depth,
         params2.angle, params2.scale, params.octaveCentre,
-        'G', 'L', 'R'
+        'G', 'L', 'R', inst2.midiMin, inst2.midiMax
       )
       if (currentNotes2.length > 0) currentABC2 = buildABC(currentNotes2, params.tempo, 2)
     }
@@ -854,6 +876,7 @@ function buildNodeText() {
 
   const v1Lines = [
     `%%bd_voice 1`,
+    `%%bd_instrument ${params.instrument}`,
     `%%bd_scale ${scale}`,
     `%%bd_depth ${depth}`,
     `%%bd_angle ${params.angle}`,
@@ -867,6 +890,7 @@ function buildNodeText() {
     // Single-voice backwards-compat: inline voice 1 directives into shared block
     return [
       `%%bd_module lsmusic_module.html`,
+      `%%bd_instrument ${params.instrument}`,
       `%%bd_axiom ${g('axiom-input').value.trim()}`,
       `%%bd_rules [`,
       g('rules-area').value.trim(),
@@ -891,6 +915,7 @@ function buildNodeText() {
   const v2Rules = g('rules-area-2').value.trim()
   const v2Lines = [
     `%%bd_voice 2`,
+    `%%bd_instrument ${params2.instrument}`,
     `%%bd_scale ${params2.scale}`,
     `%%bd_depth ${params2.depth}`,
     `%%bd_angle ${params2.angle}`,
@@ -909,6 +934,13 @@ function applyDirectives(parsed) {
   // Merge: shared provides defaults; voice1 overrides per-voice fields
   const d = Object.assign({}, parsed.shared, parsed.voice1)
 
+  if (d.instrument !== undefined) {
+    const instKey = INSTRUMENTS[d.instrument] ? d.instrument : 'bass_recorder'
+    if (instKey !== params.instrument) {
+      params.instrument = instKey; pending.instrument = instKey
+      createSampler(1, instKey)
+    }
+  }
   if (d.axiom !== undefined) {
     params.axiom = d.axiom; pending.axiom = d.axiom
     document.getElementById('axiom-input').value = d.axiom
@@ -984,6 +1016,13 @@ function applyDirectives(parsed) {
     }
     if (v2.scale !== undefined && SCALES[v2.scale]) {
       params2.scale = v2.scale; pending2.scale = v2.scale
+    }
+    if (v2.instrument !== undefined) {
+      const instKey = INSTRUMENTS[v2.instrument] ? v2.instrument : 'bass_recorder'
+      if (instKey !== params2.instrument) {
+        params2.instrument = instKey; pending2.instrument = instKey
+        createSampler(2, instKey)
+      }
     }
   }
 }
@@ -1102,6 +1141,8 @@ wireSlider('chorus-depth', 'chorus-depth-val', 'chorusDepth', v => v.toFixed(2))
 // Post BD_READY immediately — samples still loading but module is in DOM
 window.parent.postMessage({ type: 'BD_READY' }, '*')
 setStatus('Loading samples…')
+createSampler(1, 'bass_recorder')
+createSampler(2, 'bass_recorder')
 </script>
 </body>
 </html>
