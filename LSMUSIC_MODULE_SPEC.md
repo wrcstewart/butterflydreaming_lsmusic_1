@@ -1,4 +1,3 @@
-
 # ButterflyDreaming L-System Music Module — Specification v0.1
 
 ## Overview
@@ -117,27 +116,20 @@ in the format `symbol=replacement`.
 
 ## L-System Grammar
 
-### Default Grammar — Hilbert Curve
+### Default Grammar — Koch Island
 
-From Prusinkiewicz & Hanan, *Lindenmayer Systems, Fractals, and Plants*,
-Figure 2.7(b):
+The default single-voice grammar. Uses only the Voice 1 symbol set.
 
 ```
-Axiom: X
-X → −YF+XFX+FY−
-Y → +XF−YFY−FX+
+Axiom: F-F-F-F
+F=F+FF-FF-F-F+F+FF-F+F-F-FF+FF+
 Angle: 90°
+Depth: 1
 ```
-
-This produces a space-filling curve with clean horizontal and vertical segments,
-which maps unambiguously to the Prusinkiewicz pitch/duration model.
 
 ### Iteration
 
 Use the lindenmayer library identically to the visual module. Depth range 1–5.
-At depth 4 the Hilbert curve produces approximately 340 horizontal segments —
-musically rich but schedulable. At depth 5 the note count exceeds 1300 and may
-cause noticeable scheduling delay. Depth 4 is the default.
 
 ---
 
@@ -146,11 +138,25 @@ cause noticeable scheduling delay. Depth 4 is the default.
 This section implements the Prusinkiewicz method (section 6.3, *Lindenmayer
 Systems, Fractals, and Plants*).
 
-### Which Symbols Produce Notes
+### Voice 1 Symbol Set
 
-Only `F` (forward draw) produces a note. All other symbols (`+`, `−`, `X`, `Y`,
-and any other non-drawing symbols) are silently ignored during musical
-interpretation.
+| Symbol | Role |
+|--------|------|
+| `F` | Forward step — produces a note if horizontal |
+| `+` | Turn left by angle |
+| `-` | Turn right by angle |
+
+All other symbols are transparent to Turtle 1 and ignored during interpretation.
+
+### Voice 2 Symbol Set
+
+| Symbol | Role | Voice 1 equivalent |
+|--------|------|--------------------|
+| `G` | Forward step — produces a note if horizontal | `F` |
+| `L` | Turn left by angle | `+` |
+| `R` | Turn right by angle | `-` |
+
+All other symbols are transparent to Turtle 2 and ignored during interpretation.
 
 ### Turtle Geometry
 
@@ -159,34 +165,33 @@ Run a standard 2D turtle interpreter over the iterated string:
 - Initial heading: 0° (pointing right, positive X direction)
 - Initial position: (0, 0)
 - Step length: 1 unit
-- `F` — move forward one step, record start and end position
-- `+` — turn left by angle
-- `−` — turn right by angle
-- All other symbols — no action
+- Forward symbol — move forward one step, record start and end position
+- Left turn symbol — turn left by angle
+- Right turn symbol — turn right by angle
+- All other symbols — no action (transparent)
 
 At 90° all segments are strictly horizontal or vertical.
 
 ### Segment Classification
 
-After turtle interpretation, classify each `F` segment:
+After turtle interpretation, classify each forward step:
 
 - **Horizontal segment** — start Y and end Y are equal within floating point
   tolerance of 0.001. This segment **produces a note**.
-- **Vertical segment** — start X and end X are equal. This segment produces
-  **no note** and is silently skipped.
+- **Vertical segment** — produces no note and is silently skipped.
 
 ### Pitch Mapping
 
 The Y-coordinate of a horizontal segment determines its pitch.
 
-**Octave centre:** `%%bd_octave_centre` sets the central octave (default 4,
-i.e. middle C octave). Y=0 maps to the tonic of the central octave.
-
 **Y normalisation:** Compute the min and max Y across all horizontal segments.
-Map linearly across this range to ±2 octaves from the octave centre. Clamp to
-the sampler's usable range (F#2 to E4 — the bass recorder sample range). The
-Y range is computed fresh on each recompute, so the pitch mapping is always
-relative to the current grammar and depth.
+Map linearly across this range to the sampler's usable MIDI range (F#2 to E4,
+MIDI 42–64). Clamp all values to this range. The Y range is computed fresh on
+each recompute per voice independently.
+
+**`%%bd_octave_centre`:** Currently reserved — not functionally implemented.
+The pitch mapping uses the full sampler range regardless of this value.
+Proper implementation is a future amendment.
 
 **Scale lookup tables:**
 
@@ -198,45 +203,47 @@ const scales = {
 };
 ```
 
-Map the normalised Y value to a scale degree index, then to a Tone.js pitch
-string (e.g. `"C4"`, `"G3"`). The root is always C in v0.1. Key transposition
-is a future amendment.
+Map each MIDI value to the nearest in-scale pitch. The root is always C in v0.1.
 
 ### Duration Mapping
 
-All `F` segments have length 1 (unit step), therefore all notes produced by
-horizontal segments have equal duration. The base note duration in seconds is:
+The duration of each note is proportional to its run length (Amendment 6):
 
 ```
-note_duration_seconds = 60 / %%bd_tempo
+note_duration_seconds = run_length × (60 / %%bd_tempo)
 ```
 
-At the default 80 BPM each note is 0.75 seconds.
+### Same-Pitch Run Merging
+
+After pitch mapping, consecutive notes of identical pitch are merged into a
+single note of combined duration (Amendment 6). This applies independently
+to each voice.
 
 ### Rest Handling
 
-Vertical segments produce no note. Silence between notes occurs naturally via
-the Tone.js sampler's decay — no explicit rests need to be inserted.
+Vertical segments produce no note. Silence occurs naturally via the Tone.js
+sampler's decay.
 
 ---
 
 ## ABC Generation (Internal)
 
 After interpreting the turtle output, generate an ABC string for internal use
-and for the Copy Music button. This ABC is never displayed in the UI.
+and for the Copy ABC Score button. This ABC is never displayed in the UI.
 
 ```
 X:1
-T:L-System Fragment
+T:L-System Fragment — Voice 1
 M:4/4
 L:1/8
-Q:1/4=[tempo]
+Q:1/8=[tempo]
 K:C
 ```
 
-Group notes into bars of 4/4. Each note is expressed in ABC pitch notation.
-Barlines are inserted automatically every 4 beats. The ABC is passed to abcjs
-for scheduling and to Tone.js for playback, exactly as in the music module.
+Group notes into bars of 4/4. Each note is expressed in ABC pitch notation with
+correct length suffix (e.g. `C2`, `G4`). Barlines are inserted automatically
+every 8 eighth-note units. Notes longer than the remaining bar space are tied
+across the barline.
 
 ---
 
@@ -281,9 +288,14 @@ Follows the visual module harness pattern. Dark background, two columns:
 **Left column — Controls:**
 - Label: `EXTENDED L-SYSTEM NOTATION`
 - A `<textarea>` (id: `ls-input`) pre-populated with the default node text
-  (see Default Node Text below)
 - Button: `Send to Player` — posts `BD_INIT` to the iframe
 - Button: `Request Update` — posts `BD_REQUEST_UPDATE` to the iframe
+- Three copy buttons below the textarea:
+  - `COPY ABC SCORE` — copies GENERATED ABC SCORE text area content
+  - `COPY SCRIPT` — copies script textarea content
+  - `COPY LINK` — encodes script as URL and copies to clipboard
+- Label: `GENERATED ABC SCORE`
+- Read-only scrollable text area showing generated ABC (both voices if present)
 - Status area showing last message received from module
 
 **Right column — Player:**
@@ -291,473 +303,6 @@ Follows the visual module harness pattern. Dark background, two columns:
 - 600×500px
 
 ### Default Node Text
-
-```
-%%bd_module lsmusic_module.html
-%%bd_axiom X
-%%bd_rules [
-X=-YF+XFX+FY-
-Y=+XF-YFY-FX+
-%%bd_]
-%%bd_depth 4
-%%bd_angle 90
-%%bd_scale pentatonic
-%%bd_tempo 80
-%%bd_octave_centre 4
-%%bd_loop true
-%%bd_loop_gap 4
-%%bd_reverb_wet 0.35
-%%bd_reverb_decay 2.5
-%%bd_vibrato_frequency 5.0
-%%bd_vibrato_depth 0.2
-%%bd_chorus_wet 0.3
-%%bd_chorus_depth 0.4
-```
-
----
-
-## File 2: lsmusic_module.html (The Module)
-
-### Layout
-
-Dark background, calm minimal aesthetic consistent with the visual and music
-modules.
-
-**Top row — Status:**
-- Status line: e.g. `Loading samples...` / `Ready` / `Playing` / `Stopped`
-- Small label: `Module: lsmusic_module.html`
-
-**Controls row:**
-- `Play` button (disabled until samples loaded and grammar parsed)
-- `Stop` button
-- `Copy Music` button — copies generated ABC to clipboard; disabled until first
-  successful parse; briefly shows `Copied!` after copy then reverts
-
-**Grammar controls:**
-- Depth selector: dropdown 1–5, labelled `DEPTH`
-- Scale selector: dropdown with options `major` / `pentatonic` / `blues`,
-  labelled `SCALE`
-- Tempo slider: range 40–160 BPM, labelled `TEMPO`, displays current BPM value
-
-**Grammar area:**
-- Label: `L-SYSTEM GRAMMAR`
-- Axiom input: single-line text field, labelled `AXIOM`
-- Rules textarea: multi-line, labelled `RULES` (one rule per line,
-  format `X=replacement`)
-
-**Audio effects sliders** (inherited from music module):
-- Reverb Wet (0.0–1.0)
-- Reverb Decay (0.1–10.0 seconds)
-- Vibrato Frequency (1.0–10.0 Hz)
-- Vibrato Depth (0.0–1.0)
-- Chorus Wet (0.0–1.0)
-- Chorus Depth (0.0–1.0)
-
-**No ABC display.** The generated ABC is internal only.
-
-### Initialisation Sequence
-
-1. Post `BD_READY` to parent immediately on load
-2. Begin loading Tone.js Sampler with the four bass recorder samples
-3. Set status to `Loading samples...`
-4. Listen for postMessage events
-
-### Message Handling
-
-**BD_INIT received:**
-1. Parse all `%%bd_` directives from the node text
-2. Populate axiom field, rules textarea, depth, scale, tempo, and all audio
-   effects controls from directives
-3. Iterate the L-system to the specified depth using the lindenmayer library
-4. Run turtle interpreter and classify segments
-5. Generate ABC internally
-6. Schedule Tone.js sequence
-7. If any step fails post `BD_ERROR` and update status
-8. If successful set status to `Ready — press Play`
-9. Do not autoplay
-
-**BD_REQUEST_UPDATE received:**
-Post `BD_UPDATE` with the current node text reconstructed from current control
-values — grammar directives, depth, scale, tempo, octave centre, loop settings,
-and all audio effects directives. The generated ABC is **not** included in the
-returned text.
-
-**BD_STOP received:**
-Stop playback immediately, set status to `Stopped`.
-
----
-
-## Known Limitations (v0.1)
-
-- Root key is always C — transposition is a future amendment
-- Only horizontal segments produce notes — non-right-angle grammars are a
-  future amendment using complex number projection
-- Single production rule format only (`symbol=replacement`) — stochastic and
-  parametric L-systems are future work
-- No visual rendering — a combined visual+music module is a future amendment
-
----
-
-## Amendment Record
-
-*Amendments to be recorded here as they are made, following the same convention
-as `VISUAL_MODULE_SPEC.md` and `MUSIC_MODULE_SPEC.md`.*
-
-
-Good thinking. Here it is:
-
----
-
-### Amendment 1 — Correct Duration Mapping to Prusinkiewicz Method
-
-The initial implementation treated every horizontal `F` segment as a note of equal duration. This is incorrect. The Prusinkiewicz method (section 6.3, Figure 6.9) states explicitly that note duration is proportional to segment length, where segment length is the count of consecutive horizontal `F` steps forming a continuous horizontal run.
-
-#### Corrected Segment Classification
-
-During turtle interpretation, do not emit a note per `F` step. Instead, accumulate consecutive horizontal `F` steps into runs. A run ends when any of the following occurs:
-
-- A turn symbol (`+` or `−`) is encountered
-- A vertical `F` step occurs (i.e. the heading is vertical at that point)
-- The string is exhausted
-
-Each completed horizontal run produces exactly one note.
-
-#### Corrected Duration Mapping
-
-The duration of the note produced by a horizontal run is proportional to the number of `F` steps in that run:
-
-```
-note_duration_seconds = run_length × (60 / %%bd_tempo)
-```
-
-A run of length 1 produces a quaver-equivalent, length 2 a crotchet-equivalent, and so on. All durations scale with tempo as before.
-
-#### ABC Generation
-
-Express variable note lengths correctly in the generated ABC notation. A run of length `n` at the base `L:1/8` unit produces a note of length `n` in ABC terms (e.g. `C2` for length 2, `C4` for length 4).
-
-#### No Other Changes
-
-Pitch mapping, scale lookup, Y normalisation, and all other behaviour are unchanged.
-Good pragmatic approach — fix one thing at a time and get proper visibility of what's being generated.
-
-Here is Amendment 2:
-
----
-
-### Amendment 2 — ABC Debug Display and Note Duration Fix
-
-#### Part A — ABC Debug Display
-
-Add a read-only text area below the script input box in `index.html` labelled `GENERATED ABC`. This text area:
-
-- Is populated every time the module posts a `BD_UPDATE` message containing a `generatedABC` field
-- Is read-only but selectable and scrollable
-- Has sufficient height to show approximately 10 lines without scrolling
-- Is clearly labelled as debug output
-
-In `lsmusic_module.html`, include the generated ABC string as an additional field `generatedABC` in every `BD_UPDATE` message payload. This field is for debug purposes only and is not written back into the node text.
-
-#### Part B — Note Duration Fix
-
-The ABC generator must implement run-length accumulation for horizontal segments as specified in Amendment 1. This fix must operate at the ABC generation stage, not at the Tone.js scheduling stage.
-
-Specifically:
-
-- Consecutive horizontal `F` steps at the same Y coordinate without an intervening turn are accumulated into a single run of length `n`
-- The ABC note for that run is expressed as `Xn` where `X` is the pitch letter and `n` is the run length (e.g. `E2`, `G4`)
-- A run of length 1 is expressed without a length suffix (e.g. `E` not `E1`)
-- The Tone.js scheduler must read note durations from the ABC, not recalculate them independently
-
----
-
-Ready for Claude Code.
-
-Yes — the debug display is the priority, without it we're flying blind.
-
-The most likely cause is that `lsmusic_module.html` is not including `generatedABC` in its `BD_UPDATE` payload, or it is only sending `BD_UPDATE` in response to `BD_REQUEST_UPDATE` rather than also sending it after a successful `BD_INIT` parse.
-
-Here is Amendment 3:
-
----
-
-### Amendment 3 — Fix ABC Debug Display Population
-
-#### Problem
-The generated ABC text area in `index.html` is not populating when Send to Player is pressed.
-
-#### Fix
-
-In `lsmusic_module.html`, after a successful `BD_INIT` sequence — once the L-system has been iterated, the turtle has run, and the ABC has been generated — immediately post a `BD_UPDATE` message to the parent containing the `generatedABC` field. Do not wait for a `BD_REQUEST_UPDATE`.
-
-```javascript
-window.parent.postMessage({
-  type: 'BD_UPDATE',
-  text: currentNodeText,
-  generatedABC: currentABC
-}, '*');
-```
-
-In `index.html`, the `message` event listener must handle `BD_UPDATE` messages by writing the `generatedABC` field into the debug text area if that field is present.
-
-#### No Other Changes
-All other behaviour is unchanged.
-
----
-
-Short and targeted — Claude Code should be able to nail this in one pass.
-### Amendment 4 — Implement ABC Run-Length Accumulation Correctly
-
-#### Problem
-The ABC generator is emitting one quaver per `F` step regardless of run length. Amendments 1 and 2 specified run-length accumulation but it has not been implemented correctly in the ABC generation stage.
-
-#### Definition of a Run
-A run is a sequence of consecutive horizontal `F` steps where:
-- All steps are horizontal (heading is 0° or 180° at time of step)
-- No turn symbol (`+` or `−`) intervenes between steps
-- No vertical `F` step intervenes between steps
-
-Two horizontal `F` steps at the same pitch but separated by a turn are **not** a run — they are two separate notes. The pitch match is irrelevant; only the absence of an intervening turn or vertical step defines a run.
-
-#### Required Change — Turtle Interpreter
-During turtle interpretation, each horizontal `F` step must be tagged with a `consecutive` boolean:
-- `true` if the immediately preceding symbol was also a horizontal `F` step
-- `false` if the preceding symbol was a turn, a vertical `F` step, or the start of the string
-
-#### Required Change — ABC Generator
-Replace the current per-step note emission with run-length accumulation:
-
-```javascript
-let i = 0;
-while (i < horizontalSegments.length) {
-    let run = 1;
-    while (i + run < horizontalSegments.length &&
-           horizontalSegments[i + run].consecutive === true) {
-        run++;
-    }
-    // emit note with run length suffix if > 1
-    abc += horizontalSegments[i].pitch + (run > 1 ? run : '') + ' ';
-    i += run;
-}
-```
-
-Note that run accumulation is based solely on the `consecutive` flag — **not** on pitch equality. Two consecutive horizontal steps of different pitches do not form a run; the first step has `consecutive === false` on the second step, breaking the run at that point.
-
-#### Verification
-After this fix, bars 1 and 2 of the depth 4 Hilbert output should no longer read `EEEEEEEE|EEEEEEEE`. Long horizontal traversals at the same Y level should produce notes with length suffixes such as `E4` or `E8` rather than repeated single quavers. The total number of note symbols in the ABC should be significantly less than the total number of `F` steps in the iterated string.
-
-#### No Other Changes
-Pitch mapping, scale lookup, Y normalisation, and all audio rendering are unchanged.
-
-CC's own explanation reveals the actual bug. The fix is resetting runs on **any non-F character** including `X`, `Y` and other non-drawing symbols. But those non-drawing symbols are geometrically invisible — they don't change the turtle heading. So `F X F` where both F steps are horizontal with the same heading **is** a genuine run — the X is transparent.
-
-The rule should be: **only `+` and `−` break a run**. Non-drawing symbols like `X` and `Y` are transparent to run accumulation because they don't change the turtle's heading or position.
-
-For the Hilbert grammar `X=-YF+XFX+FY-`, when iterated the F steps between turns always have X or Y symbols between them — so CC's fix breaks every single run, giving all length-1 notes. That's exactly what we're seeing.
-
-### Amendment 5 — Fix Run-Break Logic
-
-#### Problem
-The `buildHorizontalSegments()` function resets the run counter on any non-F character, including non-drawing symbols such as `X` and `Y`. This incorrectly breaks geometrically contiguous horizontal runs wherever the grammar places structural symbols between F steps.
-
-#### Correct Rule
-A run is broken **only** by:
-- A turn symbol (`+` or `−`)
-- A vertical `F` step (heading is vertical at that point)
-
-Non-drawing symbols (`X`, `Y`, and any other symbol that neither moves the turtle nor changes its heading) are **transparent** to run accumulation and must not reset the run counter.
-
-#### Required Change
-In `buildHorizontalSegments()` or equivalent, change the reset condition from:
-
-```javascript
-// WRONG — resets on any non-F character
-if (symbol !== 'F') prevHorizF = false;
-```
-
-To:
-
-```javascript
-// CORRECT — only turns break a run
-if (symbol === '+' || symbol === '-') prevHorizF = false;
-```
-
-#### Verification
-After this fix, the depth 4 Hilbert output should contain notes with length suffixes. The opening bars should no longer be `EEEEEEEE|EEEEEEEE`.
-
-Exactly right — the pitch mapping is now fixed, giving proper spread. The last remaining issue is the same-pitch merging. Here is Amendment 6:
-
----
-
-### Amendment 6 — Same-Pitch Note Merging
-
-#### Problem
-The ABC output contains consecutive notes at the same pitch written as separate quavers (e.g. `C C`) rather than a single longer note (e.g. `C2`). This happens because the duration is computed before same-pitch merging.
-
-#### Fix
-After pitch mapping and before ABC generation, add a post-processing pass over the note array that merges consecutive notes of identical pitch into a single note with combined duration:
-
-```javascript
-function mergeConsecutivePitches(notes) {
-  if (notes.length === 0) return [];
-  const merged = [];
-  for (const note of notes) {
-    if (merged.length > 0 && 
-        merged[merged.length - 1].pitch === note.pitch) {
-      merged[merged.length - 1].runLength += note.runLength;
-    } else {
-      merged.push({ ...note });
-    }
-  }
-  return merged;
-}
-```
-
-This pass must run **after** `mapYToPitch()` and **before** `buildABC()`. The ABC generator already handles variable `runLength` correctly via ties across barlines.
-
-#### Expected Result
-No two consecutive notes in the ABC output should share the same pitch letter and octave. `C C` becomes `C2`, `G,G,G,G,` becomes `G,4`, and so on.
-
-#### No Other Changes
-Pitch mapping, scale lookup, turtle interpreter, and audio rendering are unchanged.
-
-The Chinese quality makes sense — pentatonic scale on a recorder timbre with vibrato is very close to a dizi or xiao. A happy accident that fits the BD aesthetic rather well.
-
-On the Request Update bug — this is the same class of issue that appeared in the visual module. The BD_REQUEST_UPDATE handler is probably reconstructing the node text from the original parsed directives rather than reading the current live values from the slider controls.
-
-### Amendment 7 — Fix BD_REQUEST_UPDATE Slider Values
-
-#### Problem
-When `BD_REQUEST_UPDATE` is received, the returned node text does not reflect current slider positions. The handler is reading from stored parsed directive values rather than the live control state.
-
-#### Fix
-In the `BD_REQUEST_UPDATE` handler, reconstruct the node text by reading current values directly from every control element at the moment the request is received:
-
-- Depth selector — read `.value`
-- Scale selector — read `.value`
-- Tempo slider — read `.value`
-- Octave centre — read `.value`
-- Loop checkbox — read `.checked`
-- Loop gap — read `.value`
-- Reverb wet, reverb decay — read `.value`
-- Vibrato frequency, vibrato depth — read `.value`
-- Chorus wet, chorus depth — read `.value`
-- Axiom field — read `.value`
-- Rules textarea — read `.value`
-
-The generated ABC is **not** included in the returned text. The `generatedABC` field is included in the payload for the debug display as per Amendment 2.
-
-#### No Other Changes
-All other behaviour unchanged.
-
-### Amendment 8 — Debug Label, Copy Buttons and URL Parameter Loading
-
-#### 8.1 — Rename Debug Label
-Change the label of the generated ABC text area from `GENERATED ABC` to `GENERATED ABC SCORE`.
-
-#### 8.2 — Add Three Copy Buttons
-Add three buttons in `index.html` positioned below the script textarea, in this order:
-
-**COPY ABC SCORE**
-Copies the current content of the GENERATED ABC SCORE text area to the clipboard. Briefly changes label to `Copied ✓` for 1.5 seconds. Disabled if the text area is empty.
-
-**COPY SCRIPT**
-Copies the current content of the script textarea to the clipboard. Briefly changes label to `Copied ✓` for 1.5 seconds.
-
-**COPY LINK**
-- Takes the current script textarea content
-- Encodes it using `btoa(unescape(encodeURIComponent(text)))`
-- Constructs a URL in the form:
-  `https://wrcstewart.github.io/butterflydreaming_lsmusic_1/?script=BASE64STRING`
-- Copies that URL to the clipboard
-- Briefly changes label to `Link Copied ✓` for 1.5 seconds
-
-#### 8.3 — Load Script from URL Parameter on Startup
-
-On page load the correct sequence must be written as a single linear flow. Do not split into separate initialisation blocks.
-
-> ⚠ **Known sequencing pitfall** — also encountered in the 2D visual module (VISUAL_MODULE_SPEC.md Amendment 12). The URL parameter check must execute before any default script is applied or any auto-send is triggered. The entire sequence must be:
-
-```javascript
-// CORRECT sequence — do not reorder
-const scriptParam = new URLSearchParams(window.location.search).get('script');
-if (scriptParam) {
-    textarea.value = decodeURIComponent(atob(scriptParam));
-} else {
-    textarea.value = DEFAULT_SCRIPT;
-}
-// auto-send fires here using whatever is now in textarea
-// does NOT autoplay — populates player only, respects browser autoplay restrictions
-sendToPlayer();
-```
-
-If no `script` parameter is present the default node text loads as normal. Auto-send populates the player but does **not** trigger playback — the user must press Play, respecting browser autoplay restrictions.
-
-#### No Other Changes
-All other behaviour unchanged.
-
----
-
-### Amendment 9 — Corrections to Copy Link Encoding and URL Parameter Loading
-
-Two bugs prevented the Copy Link / URL parameter round-trip from working.
-
-#### Bug 1 — Encode: base64 `+` characters corrupted by URL parsing
-
-The original encode was `btoa(unescape(encodeURIComponent(textarea.value)))`. The base64 alphabet includes `+`, `/`, and `=`. When this string was placed directly in the URL without further encoding, `URLSearchParams.get()` applied `application/x-www-form-urlencoded` parsing, which treats `+` as a space. This corrupted the base64 before `atob()` could decode it.
-
-**Fix:** Replace the base64 chain with a direct `encodeURIComponent(textarea.value)`. Simpler, no base64, no `+` ambiguity.
-
-#### Bug 2 — Decode: double percent-decoding of `%%` directives
-
-`URLSearchParams.get()` already percent-decodes the query parameter value once. The script directives begin with `%%`, which `encodeURIComponent` encodes as `%25%25` in the URL. `URLSearchParams.get()` decodes `%25%25` back to `%%` correctly. But the code then called `decodeURIComponent()` a second time on that result. `decodeURIComponent("%%bd_...")` throws `URIError` because `%%` is not a valid percent-escape sequence. This error was silently caught and the textarea was reset to the default script.
-
-**Fix:** Use `scriptParam` directly — no `decodeURIComponent` call. `URLSearchParams.get()` has already done the decoding.
-
-#### Final correct implementation
-
-```javascript
-// Encode (Copy Link button)
-const url = `https://.../?script=${encodeURIComponent(textarea.value)}`
-
-// Decode (page load)
-const scriptParam = new URLSearchParams(window.location.search).get('script')
-if (scriptParam) {
-    textarea.value = scriptParam          // URLSearchParams already decoded it
-} else {
-    textarea.value = DEFAULT_SCRIPT
-}
-```
-
----
-
-## Phase 2 — Two Voices
-
-*Work from this point onwards concerns the addition of a second independent voice to the module.*
-
-
-### Amendment 9 — Two-Voice System (Final)
-
-#### Overview
-Extend the L-system music module to support two independent melodic voices rendered simultaneously. The two voices share sliders, sampler effects chain, Tone.js transport, octave centre, and loop controls. Each voice has its own symbol alphabet, turtle instance, axiom, rules, depth, angle, scale, and ABC score. No chord notation is used.
-
----
-
-#### 9.1 — New Symbol Alphabet for Voice 2
-
-| Symbol | Role | Voice 2 equivalent of |
-|--------|------|----------------------|
-| `G` | Forward step — note if horizontal | `F` |
-| `<` | Turn left by angle | `+` |
-| `>` | Turn right by angle | `-` |
-
-No other symbols need to be declared. Each turtle acts only on its own three active symbols — every other symbol is automatically transparent and ignored. Helper symbols such as X, Y or any other letter may be used freely in grammars without affecting the turtle interpreters.
-
----
-
-#### 9.2 — Script Structure
-
-The node text is divided into a shared header block followed by one or two voice blocks. The `%%bd_voice` directive opens a new voice block. All directives before the first `%%bd_voice` directive are shared.
 
 ```
 %%bd_module lsmusic_module.html
@@ -782,151 +327,435 @@ F=F+FF-FF-F-F+F+FF-F+F-F-FF+FF+
 %%bd_]
 
 %%bd_voice 2
-%%bd_scale blues
+%%bd_scale pentatonic
 %%bd_depth 1
 %%bd_angle 90
-%%bd_axiom G>G>G>G
+%%bd_axiom GRGRGRG
 %%bd_rules [
-G=G<GG>GG>G>G<G<GG>G<G>G>GG<GG
+G=GLGGRGGRGRGLGLGGRGLGRGRGGLGGL
 %%bd_]
 ```
 
-**Backwards compatibility:** A script with no `%%bd_voice` directive is treated as a single Voice 1 script. Voice 2 is silent. All existing single-voice scripts work without modification.
+### URL Parameter Loading
 
-**Single voice with explicit marker:** `%%bd_voice 1` may appear in a single voice script for clarity — this is valid and equivalent to no marker.
+On page load the correct sequence must be written as a single linear flow:
+
+```javascript
+// CORRECT sequence — do not reorder
+const scriptParam = new URLSearchParams(window.location.search).get('script');
+if (scriptParam) {
+    textarea.value = scriptParam;   // URLSearchParams already decoded it
+} else {
+    textarea.value = DEFAULT_SCRIPT;
+}
+sendToPlayer();   // populate player but do NOT autoplay
+```
+
+> ⚠ **Known sequencing pitfall** — also encountered in the 2D visual module
+> (VISUAL_MODULE_SPEC.md Amendment 12). The URL parameter check must execute
+> before any default script is applied or any auto-send is triggered.
+
+### Copy Link Encoding
+
+```javascript
+// Encode (Copy Link button)
+const url = `https://wrcstewart.github.io/butterflydreaming_lsmusic_1/?script=${encodeURIComponent(textarea.value)}`;
+
+// Decode (page load) — URLSearchParams.get() already decodes, no further call needed
+const scriptParam = new URLSearchParams(window.location.search).get('script');
+```
+
+> ⚠ Do NOT use `btoa`/`atob` for encoding — base64 contains `+` which
+> `URLSearchParams` treats as a space, corrupting the round-trip. Use
+> `encodeURIComponent` only.
 
 ---
 
-#### 9.3 — Directive Parsing
+## File 2: lsmusic_module.html (The Module)
 
-The parser reads the script in two passes:
+### Layout
 
-**Pass 1 — shared directives:** Read all directives before the first `%%bd_voice` line into a shared context. These apply to both voices.
+Dark background, calm minimal aesthetic consistent with the visual and music
+modules.
 
-**Pass 2 — voice blocks:** From each `%%bd_voice` line, read directives into that voice's context until the next `%%bd_voice` line or end of script.
+**Top row — Status:**
+- Status line: e.g. `Loading samples...` / `Ready` / `Playing` / `Stopped`
+- Small label: `Module: lsmusic_module.html`
 
-Per-voice directives (`%%bd_scale`, `%%bd_depth`, `%%bd_angle`, `%%bd_axiom`, `%%bd_rules`) are set from the voice block. Shared directives (`%%bd_tempo`, `%%bd_reverb_*`, `%%bd_vibrato_*`, `%%bd_chorus_*`, `%%bd_loop`, `%%bd_loop_gap`, `%%bd_octave_centre`) are set from the header block.
+**Controls row:**
+- `Play` button (disabled until samples loaded and grammar parsed)
+- `Stop` button
+- Depth selector: dropdown 1–5, labelled `DEPTH`
+- Scale selector: dropdown `major` / `pentatonic` / `blues`, labelled `SCALE`
+- Tempo slider: range 40–160 BPM, labelled `TEMPO`, displays current BPM value
+
+**Audio effects sliders** (inherited from music module):
+- Reverb Wet (0.0–1.0)
+- Reverb Decay (0.1–10.0 seconds)
+- Vibrato Frequency (1.0–10.0 Hz)
+- Vibrato Depth (0.0–1.0)
+- Chorus Wet (0.0–1.0)
+- Chorus Depth (0.0–1.0)
+
+**No ABC display.** The generated ABC is internal only.
+
+### Initialisation Sequence
+
+1. Post `BD_READY` to parent immediately on load
+2. Begin loading Tone.js Sampler with the four bass recorder samples
+3. Set status to `Loading samples...`
+4. Listen for postMessage events
+
+### Message Handling
+
+**BD_INIT received:**
+1. Parse all `%%bd_` directives from the node text — shared header then per-voice blocks
+2. Populate controls from directives
+3. For each voice: iterate L-system, run turtle interpreter, classify segments,
+   generate ABC internally, schedule Tone.js sequence
+4. If any step fails post `BD_ERROR` and update status
+5. If successful set status to `Ready — press Play`
+6. Do not autoplay
+7. Post `BD_UPDATE` immediately with `generatedABC` field for debug display
+
+**BD_REQUEST_UPDATE received:**
+Read current values from all live controls. Reconstruct full two-voice script —
+shared header directives first, then each voice block with current axiom, rules,
+depth, angle, scale. Post `BD_UPDATE` with reconstructed text and `generatedABC`.
+Generated ABC is not included in the node text itself.
+
+**BD_STOP received:**
+Stop playback immediately, set status to `Stopped`.
 
 ---
 
-#### 9.4 — Slider Override Behaviour
+## Two-Voice Architecture
 
-Slider values override both voices simultaneously regardless of per-voice script values. Script values are the initial state on BD_INIT; sliders take live control from that point. When a slider is moved:
+### Script Structure
+
+The node text is divided into a shared header block followed by one or two voice
+blocks. The `%%bd_voice` directive opens a new voice block. All directives before
+the first `%%bd_voice` directive are shared.
+
+**Backwards compatibility:** A script with no `%%bd_voice` directive is treated
+as a single Voice 1 script. Voice 2 is silent. All existing single-voice scripts
+work without modification.
+
+### Directive Parsing
+
+**Pass 1 — shared directives:** All directives before the first `%%bd_voice`
+line. These apply to both voices.
+
+**Pass 2 — voice blocks:** From each `%%bd_voice` line until the next
+`%%bd_voice` line or end of script.
+
+Per-voice: `%%bd_scale`, `%%bd_depth`, `%%bd_angle`, `%%bd_axiom`, `%%bd_rules`
+
+Shared: `%%bd_tempo`, `%%bd_reverb_*`, `%%bd_vibrato_*`, `%%bd_chorus_*`,
+`%%bd_loop`, `%%bd_loop_gap`, `%%bd_octave_centre`
+
+### Slider Override Behaviour
+
+Slider values override both voices simultaneously. Script values are the initial
+state on BD_INIT; sliders take live control from that point:
 
 - Scale slider — overrides scale for both voices
 - Tempo slider — overrides tempo for both voices
 - All effects sliders — apply to both sampler instances
 - Depth selector — overrides depth for both voices
 
-Changes take effect at the next loop boundary as per existing behaviour.
+Changes take effect at the next loop boundary.
 
----
+### Two-Turtle Rendering
 
-#### 9.5 — Two-Turtle Rendering
-
-Each voice's axiom and rules are iterated independently by the lindenmayer library to the voice's own depth. The resulting string is passed through `buildHorizontalSegments()` with the appropriate active symbol set:
+Each voice's axiom and rules are iterated independently by the lindenmayer
+library. The resulting string is interpreted by the appropriate turtle:
 
 - **Turtle 1** acts on `F`, `+`, `-` — every other symbol is transparent
-- **Turtle 2** acts on `G`, `<`, `>` — every other symbol is transparent
+- **Turtle 2** acts on `G`, `L`, `R` — every other symbol is transparent
 
-Both turtles start at (0, 0) heading East (0°). Each maintains its own x, y, angle state independently.
+Both turtles start at (0, 0) heading East (0°). Each maintains its own x, y,
+angle state independently.
 
-**Empty voice handling:** If a voice produces no horizontal segments it is silently ignored. No error is raised. This is the normal behaviour for a single-voice script where Voice 2 is absent.
+**Empty voice handling:** If a voice produces no horizontal segments it is
+silently ignored. No error is raised.
 
----
+### Two Separate ABC Scores
 
-#### 9.6 — Pitch Mapping
+Generate two completely independent ABC strings. Two independent Tone.js Part
+instances on the shared Tone.Transport play simultaneously. Loop boundary is the
+longer of the two sequence durations — the shorter voice is silent for the
+remainder.
 
-Apply `mapYToPitch()` independently to each voice using:
-- The voice's own scale (from script, overridden by slider)
-- The shared octave centre
-- Y range normalised independently per voice so each uses the full sampler pitch range
+### Future Architecture Note — Mixed Symbol Sets
 
-Apply same-pitch run merging (Amendment 6) independently to each voice after pitch mapping.
+In future amendments production rules will be allowed to mix the two symbol
+alphabets freely. When this is introduced the two voices will share a single
+combined iterated string. The two-turtle model handles this automatically:
 
----
+- **Turtle 1** iterates the full combined string ignoring everything except
+  `F`, `+`, `-`
+- **Turtle 2** iterates the full combined string ignoring everything except
+  `G`, `L`, `R`
 
-#### 9.7 — Two Separate ABC Scores
-
-Generate two completely independent ABC strings using the existing `buildABC()` function:
-
-**Voice 1:**
-```
-X:1
-T:L-System Fragment — Voice 1
-M:4/4
-L:1/8
-Q:1/8=[tempo]
-K:C
-[notes...]
-```
-
-**Voice 2:**
-```
-X:2
-T:L-System Fragment — Voice 2
-M:4/4
-L:1/8
-Q:1/8=[tempo]
-K:C
-[notes...]
-```
-
-The two scores are completely independent — different note counts, durations, and bar counts are all valid.
+No change to the rendering pipeline is required — only the script parsing and
+L-system iteration step changes.
 
 ---
 
-#### 9.8 — Tone.js Scheduling
+## Known Limitations (v0.1)
 
-Two independent Tone.js Part instances on the shared Tone.Transport:
-
-- **Sampler 1** — plays Voice 1 note sequence
-- **Sampler 2** — plays Voice 2 note sequence
-- Both samplers use the same bass recorder samples and effects chain
-- Both Parts start at `Tone.Transport.start()` simultaneously
-- Both Parts stop and clear together on Stop and on loop boundary recompute
-- Loop boundary is the longer of the two sequence durations — the shorter voice is silent for the remainder
-
----
-
-#### 9.9 — GENERATED ABC SCORE Display
-
-The debug text area displays both scores separated by a blank line:
-
-```
-[Voice 1 ABC]
-
-[Voice 2 ABC]
-```
-
-If only one voice is present only that score is shown. The COPY ABC SCORE button copies whatever is displayed.
-
----
-
-#### 9.10 — BD_REQUEST_UPDATE
-
-On `BD_REQUEST_UPDATE` the returned node text reconstructs the full two-voice script from current state — shared header directives first, then each voice block with its current axiom, rules, depth, angle, and scale. Slider values at time of request are written back into the shared header. Generated ABC is not included.
-
----
-
-#### 9.11 — Looping and Synchronisation
-
-At each loop boundary both voices recompute together if any control has changed. The loop gap silence applies to both voices simultaneously ensuring they never drift apart across iterations.
-
----
-
-#### Future Architecture Note — Mixed Symbol Sets
-
-In future amendments production rules will be allowed to mix the two symbol alphabets freely — a Voice 1 production may contain `G` symbols and a Voice 2 production may contain `F` symbols. When this is introduced the two voices will share a single combined iterated string rather than two separate strings. The two-turtle rendering model in section 9.5 handles this automatically:
-
-- **Turtle 1** iterates the full combined string ignoring everything except `F`, `+`, `-`
-- **Turtle 2** iterates the full combined string ignoring everything except `G`, `<`, `>`
-
-This requires no change to the rendering pipeline — only the script parsing and L-system iteration step changes. The key architectural insight is that mixing the alphabets in the rules changes the musical relationship between the two voices without requiring any change to the turtle interpreters.
-
----
-
-#### Known Limitations
-- Both voices use the same sampler timbre — independent timbres are a future amendment
-- Rule intermixing between voices requires a single combined string — deferred to a future amendment
+- Root key is always C — transposition is a future amendment
+- `%%bd_octave_centre` is not functionally implemented — future amendment
+- Only horizontal segments produce notes — non-right-angle grammars are a
+  future amendment using complex number projection
+- Both voices use the same sampler timbre — independent timbres are a future
+  amendment
+- Rule intermixing between voices (shared combined string) is a future amendment
 - No visual rendering — combined visual and music module is a future amendment
+
+---
+
+## Amendment Record
+
+### Amendment 1 — Correct Duration Mapping to Prusinkiewicz Method
+
+The initial implementation treated every horizontal `F` segment as a note of
+equal duration. The Prusinkiewicz method (section 6.3, Figure 6.9) states that
+note duration is proportional to segment length — the count of consecutive
+horizontal `F` steps forming a continuous horizontal run.
+
+#### Corrected Segment Classification
+
+Accumulate consecutive horizontal `F` steps into runs. A run ends when:
+- A turn symbol is encountered
+- A vertical `F` step occurs
+- The string is exhausted
+
+Each completed horizontal run produces exactly one note.
+
+#### Corrected Duration Mapping
+
+```
+note_duration_seconds = run_length × (60 / %%bd_tempo)
+```
+
+A run of length `n` produces a note expressed as `Xn` in ABC (e.g. `C2`, `G4`).
+
+---
+
+### Amendment 2 — ABC Debug Display and Note Duration Fix
+
+#### Part A — ABC Debug Display
+
+Add a read-only text area below the script input box in `index.html` labelled
+`GENERATED ABC`. Populated every time the module posts a `BD_UPDATE` message
+containing a `generatedABC` field. Read-only but selectable and scrollable.
+
+In `lsmusic_module.html`, include the generated ABC string as a `generatedABC`
+field in every `BD_UPDATE` message payload.
+
+#### Part B — Note Duration Fix
+
+The run-length accumulation must operate at the ABC generation stage, not at
+the Tone.js scheduling stage.
+
+---
+
+### Amendment 3 — Fix ABC Debug Display Population
+
+After a successful `BD_INIT` sequence, immediately post a `BD_UPDATE` message
+to the parent containing the `generatedABC` field. Do not wait for
+`BD_REQUEST_UPDATE`.
+
+```javascript
+window.parent.postMessage({
+  type: 'BD_UPDATE',
+  text: currentNodeText,
+  generatedABC: currentABC
+}, '*');
+```
+
+---
+
+### Amendment 4 — Implement ABC Run-Length Accumulation Correctly
+
+The ABC generator must implement run-length accumulation as specified in
+Amendment 1. The `consecutive` flag on each horizontal segment must be set
+during turtle interpretation:
+
+- `true` if the immediately preceding symbol was also a horizontal forward step
+- `false` if the preceding symbol was a turn, a vertical step, or start of string
+
+Run accumulation:
+
+```javascript
+let i = 0;
+while (i < horizontalSegments.length) {
+    let run = 1;
+    while (i + run < horizontalSegments.length &&
+           horizontalSegments[i + run].consecutive === true) {
+        run++;
+    }
+    abc += horizontalSegments[i].pitch + (run > 1 ? run : '') + ' ';
+    i += run;
+}
+```
+
+---
+
+### Amendment 5 — Fix Run-Break Logic
+
+A run is broken **only** by:
+- A turn symbol (`+` or `-` for Voice 1; `L` or `R` for Voice 2)
+- A vertical forward step
+
+Non-drawing symbols are **transparent** to run accumulation and must not reset
+the run counter. The reset condition must be:
+
+```javascript
+// CORRECT — only turns break a run
+if (symbol === '+' || symbol === '-') prevHorizF = false;
+// NOT: if (symbol !== 'F') prevHorizF = false;
+```
+
+---
+
+### Amendment 6 — Same-Pitch Note Merging and Pitch Mapping Fix
+
+#### Part A — Pitch Mapping Fix
+
+The original implementation mapped the Y range to 48 semitones (4 octaves),
+causing notes in the upper half of the range to clamp to E4. The fix maps
+`[yMin, yMax]` linearly to `[MIDI_MIN, MIDI_MAX]` (42–64) and snaps each
+value to the nearest in-scale MIDI note.
+
+#### Part B — Same-Pitch Note Merging
+
+After pitch mapping, add a post-processing pass that merges consecutive notes
+of identical pitch into a single note with combined duration:
+
+```javascript
+function mergeConsecutivePitches(notes) {
+  if (notes.length === 0) return [];
+  const merged = [];
+  for (const note of notes) {
+    if (merged.length > 0 &&
+        merged[merged.length - 1].pitch === note.pitch) {
+      merged[merged.length - 1].runLength += note.runLength;
+    } else {
+      merged.push({ ...note });
+    }
+  }
+  return merged;
+}
+```
+
+This pass runs **after** `mapYToPitch()` and **before** `buildABC()`.
+
+---
+
+### Amendment 7 — Fix BD_REQUEST_UPDATE Slider Values
+
+The `BD_REQUEST_UPDATE` handler was reading stored parsed directive values
+rather than live control state. Fix: read current values directly from every
+control element at the moment the request is received.
+
+---
+
+### Amendment 8 — Debug Label, Copy Buttons and URL Parameter Loading
+
+#### 8.1 — Rename Debug Label
+Change label from `GENERATED ABC` to `GENERATED ABC SCORE`.
+
+#### 8.2 — Add Three Copy Buttons
+
+**COPY ABC SCORE** — copies GENERATED ABC SCORE content. Disabled if empty.
+Briefly shows `Copied ✓` for 1.5 seconds.
+
+**COPY SCRIPT** — copies script textarea content.
+Briefly shows `Copied ✓` for 1.5 seconds.
+
+**COPY LINK** — encodes script with `encodeURIComponent`, constructs URL:
+`https://wrcstewart.github.io/butterflydreaming_lsmusic_1/?script=ENCODED`
+Briefly shows `Link Copied ✓` for 1.5 seconds.
+
+#### 8.3 — URL Parameter Loading and Copy Link Encoding
+
+See URL Parameter Loading and Copy Link Encoding sections in File 1: index.html
+above. The key constraint: use `encodeURIComponent` only — never `btoa`/`atob`.
+
+> ⚠ Known sequencing pitfall: URL check must run before default script load.
+> See VISUAL_MODULE_SPEC.md Amendment 12.
+
+---
+
+### Amendment 9 — Two-Voice System
+
+See Two-Voice Architecture section above, which incorporates all corrections
+from Amendments 10 and 11. The Voice 2 symbol set uses `G`, `L`, `R`
+throughout (not `<` and `>`).
+
+---
+
+### Amendment 10 — Voice 2 Symbol Change and Pitch Mapping Fix
+
+#### 10.1 — Replace `<`/`>` with `L`/`R`
+
+The symbols `<` and `>` are replaced with `L` (turn left) and `R` (turn right)
+for Voice 2. This avoids HTML rendering issues at end of lines.
+
+Turtle 2 now responds to `G`, `L`, `R`. Update all grammars accordingly.
+
+#### 10.2 — Pitch Mapping Inconsistency Fix
+
+The unison test revealed different ABC output for geometrically identical
+segment sequences. Root cause: `mapYToPitch()` was not being called identically
+for both voices. Fix: confirm `yMin`/`yMax` are computed separately from each
+voice's own segment array, same scale lookup and octave centre used for both.
+
+#### Verification Script (Unison Test)
+
+```
+%%bd_module lsmusic_module.html
+%%bd_loop true
+%%bd_loop_gap 4
+%%bd_reverb_wet 0.35
+%%bd_reverb_decay 2.5
+%%bd_vibrato_frequency 5.0
+%%bd_vibrato_depth 0.2
+%%bd_chorus_wet 0.3
+%%bd_chorus_depth 0.4
+%%bd_tempo 80
+%%bd_octave_centre 4
+
+%%bd_voice 1
+%%bd_scale pentatonic
+%%bd_depth 1
+%%bd_angle 90
+%%bd_axiom F-F-F-F
+%%bd_rules [
+F=F+FF-FF-F-F+F+FF-F+F-F-FF+FF+
+%%bd_]
+
+%%bd_voice 2
+%%bd_scale pentatonic
+%%bd_depth 1
+%%bd_angle 90
+%%bd_axiom GRGRGRG
+%%bd_rules [
+G=GLGGRGGRGRGLGLGGRGLGRGRGGLGGL
+%%bd_]
+```
+
+Voice 1 and Voice 2 ABC must be character-for-character identical.
+
+---
+
+### Amendment 11 — Correct Default Script
+
+Replace the default script in `index.html` with the Koch Island two-voice
+unison test script from Amendment 10 above. Both voices use pentatonic scale.
+Voice 1 uses `F`, `+`, `-` only. Voice 2 uses `G`, `L`, `R` only.
+No helper symbols in either voice.
+
